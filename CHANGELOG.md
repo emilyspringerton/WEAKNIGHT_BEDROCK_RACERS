@@ -1,4 +1,5 @@
 ## 2026-08-04 (4)
+- --track stadium: SHANKPIT's coliseum/dirt-track map ported as a self-contained deterministic heightfield (racer_track_stadium.h), selectable alongside the real worldapi-backed Meadow track (sess-20260723-2347-df115bd5)
 
 - feat(server,client): 8-slot bot match -- 1 human + 7 real autonomous bots. Founder: "can we get
   8 player online bot matches? same pattern as before 7 bots so i can queue into a game." Same
