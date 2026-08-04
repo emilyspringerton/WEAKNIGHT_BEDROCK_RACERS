@@ -74,11 +74,14 @@ static void draw_terrain(void) {
     glEnd();
 }
 
-static void draw_vehicle_box(float x, float y, float z, float yaw) {
+/* draw_vehicle_box: is_own selects the bright red "this is you" body color; every other active
+ * slot (bots today, other real humans once Phase 2 allows more than one) renders in a distinct
+ * blue-grey so the driver can tell their own car apart from the field at a glance. */
+static void draw_vehicle_box(float x, float y, float z, float yaw, int is_own) {
     glPushMatrix();
     glTranslatef(x, y + 0.6f, z);
     glRotatef(yaw * 180.0f / (float)M_PI, 0.0f, 1.0f, 0.0f);
-    glColor3f(0.85f, 0.15f, 0.15f); /* real vehicle body, not a placeholder wireframe */
+    if (is_own) glColor3f(0.85f, 0.15f, 0.15f); else glColor3f(0.30f, 0.42f, 0.62f);
     float hw = 0.9f, hh = 0.55f, hl = 1.7f;
     glBegin(GL_QUADS);
     /* top */
@@ -88,7 +91,7 @@ static void draw_vehicle_box(float x, float y, float z, float yaw) {
     /* front (+z = forward, matches racer_vehicle_tick's own sin(yaw)/cos(yaw) convention) */
     glColor3f(1.0f, 0.9f, 0.3f); /* headlights end, brighter -- real "which way is forward" cue */
     glVertex3f(-hw, -hh, hl); glVertex3f(-hw, hh, hl); glVertex3f(hw, hh, hl); glVertex3f(hw, -hh, hl);
-    glColor3f(0.85f, 0.15f, 0.15f);
+    if (is_own) glColor3f(0.85f, 0.15f, 0.15f); else glColor3f(0.30f, 0.42f, 0.62f);
     /* back */
     glVertex3f(-hw, -hh, -hl); glVertex3f(hw, -hh, -hl); glVertex3f(hw, hh, -hl); glVertex3f(-hw, hh, -hl);
     /* left */
@@ -170,8 +173,9 @@ int main(int argc, char **argv) {
     SDL_GL_SetSwapInterval(1);
     glEnable(GL_DEPTH_TEST);
 
-    RcVehicleState vehicle; memset(&vehicle, 0, sizeof(vehicle));
+    RcSnapshotPacket latest_snap; memset(&latest_snap, 0, sizeof(latest_snap));
     int welcomed = 0;
+    int have_snapshot = 0;
     unsigned int last_connect_retry_ms = now_ms();
     unsigned int cmd_seq = 0;
     unsigned int last_snapshot_ms = 0;
@@ -210,8 +214,8 @@ int main(int argc, char **argv) {
                 welcomed = 1;
                 printf("WELCOME received -- server-authoritative session live.\n");
             } else if (hdr.type == RC_PACKET_SNAPSHOT && (size_t)n >= sizeof(RcSnapshotPacket)) {
-                RcSnapshotPacket snap; memcpy(&snap, buf, sizeof(snap));
-                vehicle = snap.vehicle;
+                memcpy(&latest_snap, buf, sizeof(latest_snap));
+                have_snapshot = 1;
                 last_snapshot_ms = now;
             }
         }
@@ -273,24 +277,32 @@ int main(int argc, char **argv) {
         glLoadIdentity();
         gluPerspective(60.0, (double)win_w / (double)win_h, 0.1, 500.0);
 
-        /* Real chase camera -- fixed offset behind+above the vehicle along its own real yaw, not
-           a static orbit; follows wherever the server says the car actually is. */
+        /* Real chase camera -- fixed offset behind+above the player's own car (always slot 0,
+           per the server's own "slot 0 is the first human" convention) along its own real yaw,
+           not a static orbit; follows wherever the server says the car actually is. */
+        RcVehicleState own = latest_snap.vehicles[0];
         float cam_back = 8.0f, cam_up = 3.5f;
-        float eye_x = vehicle.x - sinf(vehicle.yaw) * cam_back;
-        float eye_y = vehicle.y + cam_up;
-        float eye_z = vehicle.z - cosf(vehicle.yaw) * cam_back;
+        float eye_x = own.x - sinf(own.yaw) * cam_back;
+        float eye_y = own.y + cam_up;
+        float eye_z = own.z - cosf(own.yaw) * cam_back;
 
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
-        gluLookAt(eye_x, eye_y, eye_z, vehicle.x, vehicle.y + 1.0f, vehicle.z, 0.0, 1.0, 0.0);
+        gluLookAt(eye_x, eye_y, eye_z, own.x, own.y + 1.0f, own.z, 0.0, 1.0, 0.0);
 
         draw_terrain();
-        draw_vehicle_box(vehicle.x, vehicle.y, vehicle.z, vehicle.yaw);
+        if (have_snapshot) {
+            for (int i = 0; i < RC_MAX_VEHICLES; i++) {
+                if (!latest_snap.active[i]) continue;
+                RcVehicleState *v = &latest_snap.vehicles[i];
+                draw_vehicle_box(v->x, v->y, v->z, v->yaw, i == 0);
+            }
+        }
 
         SDL_GL_SwapWindow(win);
 
         if (!win_logged) {
-            printf("Client window live, rendering real terrain + vehicle.\n");
+            printf("Client window live, rendering real terrain + vehicles.\n");
             win_logged = 1;
         }
 

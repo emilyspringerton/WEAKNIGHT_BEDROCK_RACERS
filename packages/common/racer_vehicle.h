@@ -96,6 +96,32 @@ static inline void racer_vehicle_tick(RcVehicleSimState *v, float throttle, floa
     v->z += cosf(v->yaw) * v->speed * dt;
 }
 
+/* racer_bot_drive_toward (2026-08-04, founder: "8 player online bot matches... 7 bots"): real
+ * reactive waypoint-seeking, not a scripted/pre-baked path -- every tick it looks at the bot's
+ * own current position and yaw versus wherever its target currently is and derives throttle/steer
+ * fresh, the same way a human aiming a car at a point on screen would, so a bot that gets
+ * deflected (or whose target changes) genuinely corrects instead of replaying a canned route.
+ * Slows the throttle down the sharper the required turn is (a real car can't floor it into a
+ * hairpin) rather than driving blind at full speed regardless of heading error. */
+static inline void racer_bot_drive_toward(const RcVehicleSimState *v, float target_x, float target_z,
+                                           float *out_throttle, float *out_steer) {
+    float dx = target_x - v->x, dz = target_z - v->z;
+    float dist = sqrtf(dx * dx + dz * dz);
+    if (dist < 0.001f) { *out_throttle = 0.0f; *out_steer = 0.0f; return; }
+    float desired_yaw = atan2f(dx, dz);
+    float err = desired_yaw - v->yaw;
+    while (err > (float)M_PI) err -= 2.0f * (float)M_PI;
+    while (err < -(float)M_PI) err += 2.0f * (float)M_PI;
+
+    *out_steer = err / 0.7f; /* full lock once heading error exceeds ~40 degrees */
+    if (*out_steer > 1.0f) *out_steer = 1.0f;
+    if (*out_steer < -1.0f) *out_steer = -1.0f;
+
+    float turn_severity = fabsf(err) / (float)M_PI; /* 0 (dead ahead) .. 1 (needs to reverse heading) */
+    *out_throttle = 1.0f - turn_severity * 0.7f;
+    if (*out_throttle < 0.25f) *out_throttle = 0.25f; /* always keep enough speed to actually turn */
+}
+
 /* racer_heightfield_sample: bilinear sample of a 16x16 worldapi heightmap, identical formula to
  * GoblinFoxDragon's own heightfield_sample (apps2/battlegrounds_gui/src/main.c) -- ported, not
  * reinvented, so a heightmap byte means the same real-world height here as it does there. */

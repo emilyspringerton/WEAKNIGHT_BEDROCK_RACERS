@@ -1,3 +1,25 @@
+## 2026-08-04 (4)
+
+- feat(server,client): 8-slot bot match -- 1 human + 7 real autonomous bots. Founder: "can we get
+  8 player online bot matches? same pattern as before 7 bots so i can queue into a game." Same
+  real shape shankpit-460's own bot pool used: a fixed slot count, client boots straight into a
+  running match (direct-connect, no separate matchmaker/lobby service yet -- that fork's own
+  "bring the lobby back once bot matches work" framing applies here too). `RC_MAX_VEHICLES=8` in
+  `packages/common/racer_protocol.h`; `RcSnapshotPacket` now carries all 8 vehicles' state plus
+  active/is_bot flags instead of one. Slot 0 is reserved for the first human to `CONNECT`; slots
+  1-7 spawn active and bot-controlled at server start, spread around a real starting circle (not
+  stacked at the origin). New `racer_bot_drive_toward` (`packages/common/racer_vehicle.h`): real
+  reactive waypoint-seeking through the exact same `racer_vehicle_tick` physics every other
+  vehicle uses (no cheating/teleporting, no pre-baked path) -- each bot picks a randomized point
+  inside the real terrain chunk every few seconds (or early if it arrives), derives throttle/steer
+  fresh every tick from its own current heading error, and slows down for sharp turns instead of
+  driving blind. Client renders every active slot, its own car red and everyone else blue-grey,
+  camera anchored on slot 0. Live-verified: server log showed real bot movement and heading changes
+  before any human ever connected (autonomous, not idle placeholders), and a live screenshot after
+  a human joined showed five distinct bot cars at different positions and orientations (independent
+  real headings, not a shared scripted path) alongside the player's own car. `gcc -Wall -Wextra`
+  clean on both binaries.
+
 ## 2026-08-04 (3)
 
 - feat(client): real Xbox controller support -- pressure-sensitive triggers, analog steering.

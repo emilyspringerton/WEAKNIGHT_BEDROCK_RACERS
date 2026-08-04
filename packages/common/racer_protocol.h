@@ -60,10 +60,20 @@ typedef struct {
     float speed; /* world units/sec, signed (negative = reversing) */
 } RcVehicleState;
 
+/* RC_MAX_VEHICLES (2026-08-04, founder: "can we get 8 player online bot matches? same pattern as
+ * before 7 bots so i can queue into a game") -- same real shape shankpit-460's own bot pool used
+ * (a fixed slot count, bots filling whatever a human doesn't claim, direct-connect rather than a
+ * separate matchmaker service for now, "bring the lobby back once bot matches work" was that
+ * fork's own phrasing and the same simplification applies here). Slot 0 is reserved for the first
+ * real human to CONNECT; slots 1-7 are always-active bots. */
+#define RC_MAX_VEHICLES 8
+
 typedef struct {
     RcHeader hdr;
     unsigned int server_tick;
-    RcVehicleState vehicle;
+    unsigned char active[RC_MAX_VEHICLES];  /* 0 = no vehicle in this slot (human slot, unclaimed) */
+    unsigned char is_bot[RC_MAX_VEHICLES];
+    RcVehicleState vehicles[RC_MAX_VEHICLES];
 } RcSnapshotPacket;
 
 #endif
