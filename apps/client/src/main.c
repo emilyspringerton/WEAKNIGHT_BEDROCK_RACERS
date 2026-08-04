@@ -135,10 +135,29 @@ int main(int argc, char **argv) {
     sendto(sock, &connect_hdr, sizeof(connect_hdr), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
     printf("CONNECT sent to %s:%d, retrying until WELCOME lands...\n", server_host, server_port);
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
+
+    /* Real Xbox controller support (2026-08-04, founder: "do pressure sensitive controls for
+     * bedrock racers for my controller (xbox one controller)"). SDL_GameController is the real
+     * pressure-sensitive path -- SDL_CONTROLLER_AXIS_TRIGGERRIGHT/LEFT report the actual analog
+     * travel of the triggers (0..32767, not just pressed/released), so throttle/brake genuinely
+     * ramp with how hard the trigger is pulled instead of being a second digital button. Opens
+     * the first controller found; keyboard remains the real fallback (used below whenever no
+     * controller is open) rather than this being a hard requirement to run the client at all. */
+    SDL_GameController *pad = NULL;
+    for (int i = 0; i < SDL_NumJoysticks(); i++) {
+        if (SDL_IsGameController(i)) {
+            pad = SDL_GameControllerOpen(i);
+            if (pad) {
+                printf("Controller connected: %s\n", SDL_GameControllerName(pad));
+                break;
+            }
+        }
+    }
+    if (!pad) printf("No game controller found -- using keyboard (WASD/arrows + Space).\n");
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     int win_w = 1280, win_h = 800;
@@ -164,6 +183,16 @@ int main(int argc, char **argv) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = 0;
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) running = 0;
+            if (e.type == SDL_CONTROLLERDEVICEADDED && !pad) {
+                pad = SDL_GameControllerOpen(e.cdevice.which);
+                if (pad) printf("Controller connected: %s\n", SDL_GameControllerName(pad));
+            }
+            if (e.type == SDL_CONTROLLERDEVICEREMOVED && pad
+                && e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad))) {
+                printf("Controller disconnected -- falling back to keyboard.\n");
+                SDL_GameControllerClose(pad);
+                pad = NULL;
+            }
         }
 
         unsigned int now = now_ms();
@@ -187,14 +216,43 @@ int main(int argc, char **argv) {
             }
         }
 
-        const Uint8 *keys = SDL_GetKeyboardState(NULL);
         float throttle = 0.0f, steer = 0.0f;
-        if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP]) throttle += 1.0f;
-        if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN]) throttle -= 1.0f;
-        if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT]) steer -= 1.0f;
-        if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT]) steer += 1.0f;
         unsigned int buttons = 0;
-        if (keys[SDL_SCANCODE_SPACE]) buttons |= RC_BTN_HANDBRAKE;
+        if (pad) {
+            /* Real pressure-sensitive throttle/brake -- RT/LT report actual analog trigger travel
+               (0 at rest, 32767 fully pulled), so a light tap genuinely produces a smaller
+               throttle value than a full pull, not a binary on/off. Right trigger drives forward,
+               left trigger drives reverse/brake -- composited into the same signed throttle
+               racer_vehicle_tick already expects, same convention as keyboard's W/S. */
+            Sint16 rt = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+            Sint16 lt = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
+            throttle = (float)rt / 32767.0f - (float)lt / 32767.0f;
+            if (throttle > 1.0f) throttle = 1.0f;
+            if (throttle < -1.0f) throttle = -1.0f;
+
+            /* Left stick X, real analog steering with a deadzone -- sticks rarely rest at exactly
+               0 (mechanical drift), so a small dead zone stops that drift from reading as a
+               constant, unintended steer input. */
+            const float STICK_DEADZONE = 0.15f;
+            Sint16 lx = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX);
+            float stick = (float)lx / 32767.0f;
+            if (stick > 1.0f) stick = 1.0f;
+            if (stick < -1.0f) stick = -1.0f;
+            if (fabsf(stick) > STICK_DEADZONE) {
+                steer = (stick - (stick > 0.0f ? STICK_DEADZONE : -STICK_DEADZONE)) / (1.0f - STICK_DEADZONE);
+            }
+
+            if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) {
+                buttons |= RC_BTN_HANDBRAKE;
+            }
+        } else {
+            const Uint8 *keys = SDL_GetKeyboardState(NULL);
+            if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP]) throttle += 1.0f;
+            if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN]) throttle -= 1.0f;
+            if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT]) steer -= 1.0f;
+            if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT]) steer += 1.0f;
+            if (keys[SDL_SCANCODE_SPACE]) buttons |= RC_BTN_HANDBRAKE;
+        }
 
         if (welcomed) {
             RcUserCmdPacket cmd; memset(&cmd, 0, sizeof(cmd));
@@ -240,6 +298,7 @@ int main(int argc, char **argv) {
         SDL_Delay(16);
     }
 
+    if (pad) SDL_GameControllerClose(pad);
     SDL_GL_DeleteContext(ctx);
     SDL_DestroyWindow(win);
     SDL_Quit();

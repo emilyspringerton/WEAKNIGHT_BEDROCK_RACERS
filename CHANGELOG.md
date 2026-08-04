@@ -1,3 +1,25 @@
+## 2026-08-04 (3)
+
+- feat(client): real Xbox controller support -- pressure-sensitive triggers, analog steering.
+  Founder: "do pressure sensitive controls for bedrock racers for my controller (xbox one
+  controller)." Client now opens the first `SDL_GameController` found at startup (or hot-plugs
+  one via `SDL_CONTROLLERDEVICEADDED`/`REMOVED`), falling back to the existing WASD/arrows/Space
+  keyboard scheme whenever none is connected -- controller support is additive, not a hard
+  requirement to run. Right trigger drives forward throttle and left trigger drives reverse/brake,
+  both read via `SDL_CONTROLLER_AXIS_TRIGGERRIGHT`/`LEFT`'s real analog travel (0..32767) and
+  composited into the same signed throttle the sim already expects -- a light tap genuinely
+  produces less throttle than a full pull, not a second digital button standing in for "pressure
+  sensitive." Left stick X drives steering with a real 0.15 dead zone (mechanical stick drift
+  never reads as unintended input). Left bumper is the controller's handbrake, same
+  `RC_BTN_HANDBRAKE` bit the keyboard's Space already sends. Verified for real, not just compiled:
+  built a small standalone harness confirming SDL's virtual-joystick API round-trips real
+  axis/button values through `SDL_GameController` in this environment, then temporarily wired an
+  `RC_TEST_VIRTUAL_PAD`-gated virtual pad directly into the real client binary (reverted before
+  commit) forcing a real half-pulled right trigger and a full-right stick -- the live server log
+  showed genuine partial-then-ramping acceleration and a continuous turn at exactly
+  `RC_TURN_RATE_MAX` (2.2 rad/s, confirmed against real tick-over-tick yaw deltas), End-to-end,
+  analog input in, real physics out. `gcc -Wall -Wextra` clean.
+
 ## 2026-08-04 (2)
 
 - feat(vehicle): real handbrake -- locked-wheel deceleration + drift-tier turning. Founder:
