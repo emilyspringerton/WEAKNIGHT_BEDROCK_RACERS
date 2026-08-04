@@ -15,10 +15,26 @@ attempting the whole slice at once.
 
 ## Status
 
-Just created (2026-08-04) — repo scaffold + NORTHSTAR only, no gameplay code yet. Phase 0 (see
-NORTHSTAR) is the next real work: a minimal C client/server pair, forked from `shankpit-460`'s own
-proven UDP server-authoritative pattern, driving a single vehicle around real voxel terrain served
-by `GoblinFoxDragon/server/worldapi`.
+**Phase 0 shipped (2026-08-04).** A real UDP server (`apps/server`, fixed 60Hz tick) and a real
+SDL2/GL client (`apps/client`) exist and are live-verified end-to-end: the server fetches
+`GoblinFoxDragon/server/worldapi`'s real `/heightmap` endpoint (port 7070, already deployed --
+reused exactly as this doc's own NORTHSTAR proposed, no second terrain generator built), grounds
+a single vehicle's Y to that real terrain every tick, and resolves a real arcade-tier vehicle sim
+(`packages/common/racer_vehicle.h`: accel/friction/braking, speed-scaled turn rate) purely
+server-side off the client's own UDP `UserCmd` packets -- the client never claims its own
+position, matching NORTHSTAR's own "not a client-authoritative stub" bar. The client independently
+fetches the same real heightmap, renders it as an actual sloped triangle mesh (not a flat
+placeholder), and renders the vehicle wherever the server's snapshot says it really is, via a real
+chase camera. Live-verified under Xvfb: real acceleration, real turning, and real terrain-relative
+Y all confirmed both via server tick logs and a screenshot showing the vehicle sitting on real
+rolling terrain, not floating or clipped. See `EMILY/BACKLOG.md` (2026-08-04, WEAKNIGHT_BEDROCK_
+RACERS Phase 0 entry) for the full verification trail.
+
+Not yet done: real WASD-in-a-real-window input has only been exercised via a temp test hook (env
+var forcing throttle/steer, reverted before commit) -- `SDL_GetKeyboardState` itself is real,
+proven code (the same call GoblinFoxDragon's own Town client already relies on), but a live human
+at a real keyboard hasn't driven it yet. Phase 1 (real F1-tier physics, destructible terrain,
+second vehicle) is the next real milestone -- see `docs/NORTHSTAR.md`.
 
 ## Reused, not reinvented
 
