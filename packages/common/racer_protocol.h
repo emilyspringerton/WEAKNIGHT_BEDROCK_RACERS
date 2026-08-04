@@ -43,12 +43,15 @@ typedef struct {
     unsigned char client_id;
 } RcWelcomePacket;
 
+#define RC_BTN_HANDBRAKE 1
+
 typedef struct {
     RcHeader hdr;
     unsigned int cmd_sequence;
     unsigned int cmd_time_ms;
     float throttle; /* -1..1, real analog even though keyboard only drives -1/0/1 today */
     float steer;    /* -1..1 */
+    unsigned int buttons; /* RC_BTN_* bitmask -- handbrake today, room for more without a wire break */
 } RcUserCmdPacket;
 
 typedef struct {

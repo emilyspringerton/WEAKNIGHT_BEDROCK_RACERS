@@ -115,6 +115,7 @@ int main(int argc, char **argv) {
     socklen_t client_addr_len = sizeof(client_addr);
 
     float latest_throttle = 0.0f, latest_steer = 0.0f;
+    unsigned int latest_buttons = 0;
     unsigned int latest_cmd_seq = 0;
     unsigned int last_usercmd_ms = 0;
     unsigned int server_tick = 0;
@@ -150,6 +151,7 @@ int main(int argc, char **argv) {
                     latest_cmd_seq = cmd.cmd_sequence;
                     latest_throttle = cmd.throttle;
                     latest_steer = cmd.steer;
+                    latest_buttons = cmd.buttons;
                     last_usercmd_ms = now_ms();
                     /* Reply-to address is refreshed on every real packet, not just CONNECT --
                        covers the client rebinding its own local port across a restart without
@@ -169,8 +171,10 @@ int main(int argc, char **argv) {
             if (client_connected && now - last_usercmd_ms > RC_USERCMD_STALE_MS) {
                 latest_throttle = 0.0f;
                 latest_steer = 0.0f;
+                latest_buttons = 0;
             }
-            racer_vehicle_tick(&vehicle, latest_throttle, latest_steer, RC_TICK_DT);
+            int handbrake = (latest_buttons & RC_BTN_HANDBRAKE) != 0;
+            racer_vehicle_tick(&vehicle, latest_throttle, latest_steer, handbrake, RC_TICK_DT);
             vehicle.y = racer_terrain_height_at(g_heights, vehicle.x, vehicle.z);
 
             if (client_connected) {

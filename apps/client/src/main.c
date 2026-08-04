@@ -193,6 +193,8 @@ int main(int argc, char **argv) {
         if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN]) throttle -= 1.0f;
         if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT]) steer -= 1.0f;
         if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT]) steer += 1.0f;
+        unsigned int buttons = 0;
+        if (keys[SDL_SCANCODE_SPACE]) buttons |= RC_BTN_HANDBRAKE;
 
         if (welcomed) {
             RcUserCmdPacket cmd; memset(&cmd, 0, sizeof(cmd));
@@ -201,6 +203,7 @@ int main(int argc, char **argv) {
             cmd.cmd_time_ms = now;
             cmd.throttle = throttle;
             cmd.steer = steer;
+            cmd.buttons = buttons;
             sendto(sock, &cmd, sizeof(cmd), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
         }
 

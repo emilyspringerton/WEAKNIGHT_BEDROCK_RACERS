@@ -21,21 +21,44 @@
 #define RC_FRICTION_DECEL  6.0f   /* passive decay toward 0 with no throttle input */
 #define RC_TURN_RATE_MAX   2.2f   /* rad/sec, at full speed */
 
+/* Handbrake (2026-08-04, founder: "ensure handbreak is implemented"). Real e-brake behavior, not
+ * just "brake harder": pulling it locks the rear wheels, which (1) sheds speed faster than a
+ * normal brake and (2) breaks rear traction, so the car can rotate much sharper than
+ * RC_TURN_RATE_MAX's own speed-scaled limit allows for a normal turn -- a real handbrake-turn
+ * feel, still arcade-tier (Phase 1 owns the real slip-angle model), not just a cosmetic label on
+ * the existing brake. RC_HANDBRAKE_MIN_SPEED_FOR_TURN keeps a stationary car from spinning in
+ * place when the handbrake is pulled with no motion -- a real handbrake turn needs the car
+ * already moving to have something to rotate around. */
+#define RC_HANDBRAKE_DECEL          32.0f  /* world units/sec^2, stronger than RC_BRAKE_DECEL -- locked wheels, not a tap of the brake */
+#define RC_HANDBRAKE_TURN_RATE_MAX  3.6f   /* rad/sec -- higher ceiling than RC_TURN_RATE_MAX, real lost-rear-traction rotation */
+#define RC_HANDBRAKE_MIN_SPEED_FOR_TURN 4.0f /* world units/sec -- below this, not enough real motion to rotate around */
+
 typedef struct {
     float x, y, z;
     float yaw;   /* radians */
     float speed; /* signed, world units/sec */
 } RcVehicleSimState;
 
-static inline void racer_vehicle_tick(RcVehicleSimState *v, float throttle, float steer, float dt) {
+static inline void racer_vehicle_tick(RcVehicleSimState *v, float throttle, float steer, int handbrake, float dt) {
     if (throttle > 1.0f) throttle = 1.0f;
     if (throttle < -1.0f) throttle = -1.0f;
     if (steer > 1.0f) steer = 1.0f;
     if (steer < -1.0f) steer = -1.0f;
 
-    /* Throttle opposing current motion brakes harder than passive friction (real "tap the brake"
-       feel); throttle matching current motion (or a stopped car) accelerates normally. */
-    if (throttle > 0.0f) {
+    if (handbrake) {
+        /* Real locked-wheel deceleration -- overrides throttle entirely, same as a real handbrake
+           does regardless of what the gas pedal is doing. Decays toward zero from either
+           direction, same two-branch shape the passive-friction case below uses. */
+        if (v->speed > 0.0f) {
+            v->speed -= RC_HANDBRAKE_DECEL * dt;
+            if (v->speed < 0.0f) v->speed = 0.0f;
+        } else if (v->speed < 0.0f) {
+            v->speed += RC_HANDBRAKE_DECEL * dt;
+            if (v->speed > 0.0f) v->speed = 0.0f;
+        }
+    } else if (throttle > 0.0f) {
+        /* Throttle opposing current motion brakes harder than passive friction (real "tap the
+           brake" feel); throttle matching current motion (or a stopped car) accelerates normally. */
         float rate = (v->speed < 0.0f) ? RC_BRAKE_DECEL : RC_ACCEL;
         v->speed += throttle * rate * dt;
     } else if (throttle < 0.0f) {
@@ -56,9 +79,16 @@ static inline void racer_vehicle_tick(RcVehicleSimState *v, float throttle, floa
     /* Real speed-scaled steering -- a stationary car can't pivot on the spot, and steering
        authority ramps back down again near top speed, same "can't spin out a parked car" /
        "can't yank the wheel at speed" real-feel constraints an arcade racer still needs even
-       before Phase 1's real slip-angle model exists. */
-    float speed_frac = fabsf(v->speed) / RC_MAX_SPEED;
-    float turn_rate = steer * RC_TURN_RATE_MAX * speed_frac;
+       before Phase 1's real slip-angle model exists. Handbraking swaps this for a higher, flatter
+       ceiling (real lost rear traction, not further speed-limited the way normal grip is) once
+       there's enough real speed to rotate around. */
+    float turn_rate;
+    if (handbrake && fabsf(v->speed) >= RC_HANDBRAKE_MIN_SPEED_FOR_TURN) {
+        turn_rate = steer * RC_HANDBRAKE_TURN_RATE_MAX;
+    } else {
+        float speed_frac = fabsf(v->speed) / RC_MAX_SPEED;
+        turn_rate = steer * RC_TURN_RATE_MAX * speed_frac;
+    }
     if (v->speed < 0.0f) turn_rate = -turn_rate; /* reversing steers opposite, like a real car */
     v->yaw += turn_rate * dt;
 
