@@ -1,5 +1,18 @@
 # WEAKNIGHT_BEDROCK_RACERS
 
+## Current Status (2026-08-04)
+
+Real, phased plan lives in [`docs/NORTHSTAR.md`](docs/NORTHSTAR.md) (golden-indexed) — the pitch
+below is the long-term destination, not the current build order. **Shipped and live-verified:**
+Phase 0 (real vehicle, server-authoritative, on real `worldapi`-generated voxel terrain), a real
+handbrake (locked-wheel decel + drift-tier turning), Xbox controller support (pressure-sensitive
+triggers, analog steer), and an 8-slot bot match (1 human + 7 real autonomous bots, each
+independently pathing via `racer_bot_drive_toward`). Not started: Phase 1 (real F1-tier physics,
+destructible terrain), Phase 2 (real multiplayer sync), Phase 3+ (emergent systems). See
+`EMILY/BACKLOG.md` for the full real verification trail behind each of these.
+
+---
+
 Love it. Let’s treat this like a real studio vertical slice with **hard acceptance criteria** and a **Definition of Done** that forces the game to be fun, fast, and technically real — not a tech demo.
 
 I’ll structure this like a professional product + gameplay spec.
