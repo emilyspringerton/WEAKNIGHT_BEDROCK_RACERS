@@ -33,8 +33,15 @@
 #include "../../../packages/common/http_client.h"
 #include "../../../packages/common/racer_protocol.h"
 #include "../../../packages/common/racer_vehicle.h"
+#include "../../../packages/common/racer_track_stadium.h"
 
 static unsigned char g_heights[256];
+
+/* Stadium track (2026-08-04) -- see racer_track_stadium.h's own doc comment and the server's
+ * matching --track flag. Client-side this only affects draw_terrain()'s mesh; every vehicle's Y
+ * (including the player's own) still comes straight from the server's snapshot, same as always. */
+static int g_track_stadium = 0;
+static unsigned char g_stadium_heights[RC_STADIUM_GRID * RC_STADIUM_GRID];
 
 static unsigned int now_ms(void) { return SDL_GetTicks(); }
 
@@ -54,7 +61,29 @@ static int fetch_heightmap(const char *worldapi_host, int worldapi_port) {
     return http_extract_json_uint8_array_field(resp, "height", g_heights, 256, &found) && found == 256;
 }
 
+/* draw_stadium_terrain: same real mesh-build shape as draw_terrain below, generalized to the
+ * bigger RC_STADIUM_GRID/RC_STADIUM_CELL and a dirt-track-brown base color instead of Meadow
+ * grass green -- the coliseum's own real dirt track, not decorative recoloring. */
+static void draw_stadium_terrain(void) {
+    glColor3f(0.42f, 0.32f, 0.20f);
+    glBegin(GL_TRIANGLES);
+    for (int gz = 0; gz < RC_STADIUM_GRID - 1; gz++) {
+        for (int gx = 0; gx < RC_STADIUM_GRID - 1; gx++) {
+            float wx0 = RC_STADIUM_ORIGIN + gx * RC_STADIUM_CELL, wx1 = RC_STADIUM_ORIGIN + (gx + 1) * RC_STADIUM_CELL;
+            float wz0 = RC_STADIUM_ORIGIN + gz * RC_STADIUM_CELL, wz1 = RC_STADIUM_ORIGIN + (gz + 1) * RC_STADIUM_CELL;
+            float h00 = rc_stadium_height_at(g_stadium_heights, wx0, wz0, RC_HEIGHT_SCALE);
+            float h10 = rc_stadium_height_at(g_stadium_heights, wx1, wz0, RC_HEIGHT_SCALE);
+            float h01 = rc_stadium_height_at(g_stadium_heights, wx0, wz1, RC_HEIGHT_SCALE);
+            float h11 = rc_stadium_height_at(g_stadium_heights, wx1, wz1, RC_HEIGHT_SCALE);
+            glVertex3f(wx0, h00, wz0); glVertex3f(wx0, h01, wz1); glVertex3f(wx1, h10, wz0);
+            glVertex3f(wx1, h10, wz0); glVertex3f(wx0, h01, wz1); glVertex3f(wx1, h11, wz1);
+        }
+    }
+    glEnd();
+}
+
 static void draw_terrain(void) {
+    if (g_track_stadium) { draw_stadium_terrain(); return; }
     const int grid = RC_HEIGHTMAP_GRID;
     const float half = (grid / 2.0f) * RC_CELL_SIZE;
     glColor3f(0.35f, 0.58f, 0.28f); /* Meadow grass green, matches GoblinFoxDragon's own biome_color(0, ...) */
@@ -113,13 +142,26 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--worldapi-port") == 0 && i + 1 < argc) worldapi_port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--server-host") == 0 && i + 1 < argc) server_host = argv[++i];
         else if (strcmp(argv[i], "--server-port") == 0 && i + 1 < argc) server_port = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--track") == 0 && i + 1 < argc) {
+            const char *track = argv[++i];
+            if (strcmp(track, "stadium") == 0) g_track_stadium = 1;
+            else if (strcmp(track, "meadow") != 0) {
+                fprintf(stderr, "--track: unknown track %s -- use meadow or stadium\n", track);
+                return 1;
+            }
+        }
     }
 
-    if (!fetch_heightmap(worldapi_host, worldapi_port)) {
-        fprintf(stderr, "FATAL: could not load real terrain from worldapi %s:%d\n", worldapi_host, worldapi_port);
-        return 1;
+    if (g_track_stadium) {
+        rc_stadium_generate_heights(g_stadium_heights, RC_HEIGHT_SCALE);
+        printf("Real stadium heightfield generated (%dx%d).\n", RC_STADIUM_GRID, RC_STADIUM_GRID);
+    } else {
+        if (!fetch_heightmap(worldapi_host, worldapi_port)) {
+            fprintf(stderr, "FATAL: could not load real terrain from worldapi %s:%d\n", worldapi_host, worldapi_port);
+            return 1;
+        }
+        printf("Real Meadow heightmap loaded from worldapi.\n");
     }
-    printf("Real Meadow heightmap loaded from worldapi.\n");
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) { perror("socket"); return 1; }
@@ -275,7 +317,10 @@ int main(int argc, char **argv) {
 
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
-        gluPerspective(60.0, (double)win_w / (double)win_h, 0.1, 500.0);
+        /* Stadium's real bounds (~1120 half-width, packages/common/racer_track_stadium.h) reach
+           well past Meadow's own tuned 500-unit far plane -- bumped only for this track so the
+           proven Meadow path's own depth precision/behavior stays completely untouched. */
+        gluPerspective(60.0, (double)win_w / (double)win_h, 0.1, g_track_stadium ? 2000.0 : 500.0);
 
         /* Real chase camera -- fixed offset behind+above the player's own car (always slot 0,
            per the server's own "slot 0 is the first human" convention) along its own real yaw,

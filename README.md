@@ -6,10 +6,14 @@ Real, phased plan lives in [`docs/NORTHSTAR.md`](docs/NORTHSTAR.md) (golden-inde
 below is the long-term destination, not the current build order. **Shipped and live-verified:**
 Phase 0 (real vehicle, server-authoritative, on real `worldapi`-generated voxel terrain), a real
 handbrake (locked-wheel decel + drift-tier turning), Xbox controller support (pressure-sensitive
-triggers, analog steer), and an 8-slot bot match (1 human + 7 real autonomous bots, each
-independently pathing via `racer_bot_drive_toward`). Not started: Phase 1 (real F1-tier physics,
-destructible terrain), Phase 2 (real multiplayer sync), Phase 3+ (emergent systems). See
-`EMILY/BACKLOG.md` for the full real verification trail behind each of these.
+triggers, analog steer), an 8-slot bot match (1 human + 7 real autonomous bots, each
+independently pathing via `racer_bot_drive_toward`), and a second selectable circuit: `--track
+stadium` (both server and client) drives SHANKPIT's own real coliseum/dirt-track map, ported
+verbatim (`packages/common/racer_track_stadium.h`) as a self-contained deterministic heightfield
+generator rather than a second voxel engine — see that file's own doc comment. Not started: Phase
+1 (real F1-tier physics, destructible terrain), Phase 2 (real multiplayer sync), Phase 3+
+(emergent systems). See `EMILY/BACKLOG.md` for the full real verification trail behind each of
+these.
 
 ---
 

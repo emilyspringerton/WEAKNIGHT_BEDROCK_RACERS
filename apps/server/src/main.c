@@ -37,6 +37,7 @@
 #include "../../../packages/common/http_client.h"
 #include "../../../packages/common/racer_protocol.h"
 #include "../../../packages/common/racer_vehicle.h"
+#include "../../../packages/common/racer_track_stadium.h"
 
 #define RC_SERVER_PORT 7788
 #define RC_TICK_HZ 60
@@ -47,6 +48,24 @@
 #define RC_BOT_ARRIVE_DIST 6.0f /* close enough to a waypoint to pick a new one early */
 
 static unsigned char g_heights[256];
+
+/* Stadium track (2026-08-04, founder: "we can port that map... from og shankpit engine") -- a
+ * second, self-contained circuit alongside the real Meadow/worldapi path, see
+ * racer_track_stadium.h's own doc comment for why this doesn't conflict with "don't build a
+ * second voxel engine". g_track_stadium selects it; --track meadow (the default) leaves the
+ * original worldapi-backed behavior completely untouched. */
+static int g_track_stadium = 0;
+static unsigned char g_stadium_heights[RC_STADIUM_GRID * RC_STADIUM_GRID];
+
+static float active_terrain_height(float x, float z) {
+    if (g_track_stadium) return rc_stadium_height_at(g_stadium_heights, x, z, RC_HEIGHT_SCALE);
+    return racer_terrain_height_at(g_heights, x, z);
+}
+
+static float active_terrain_half_bounds(void) {
+    if (g_track_stadium) return RC_STADIUM_HALF_BOUNDS;
+    return (RC_HEIGHTMAP_GRID / 2.0f) * RC_CELL_SIZE;
+}
 
 typedef struct {
     int active;      /* a vehicle actually exists in this slot */
@@ -104,7 +123,7 @@ static unsigned int now_ms(void) {
  * would otherwise make the ground visibly disagree with the rest of the drive. */
 static void pick_bot_waypoint(VehicleSlot *slot, unsigned int now) {
     const float margin = 12.0f;
-    const float half = (RC_HEIGHTMAP_GRID / 2.0f) * RC_CELL_SIZE - margin;
+    const float half = active_terrain_half_bounds() - margin;
     slot->bot_target_x = ((float)(rand() % 2001) / 1000.0f - 1.0f) * half;
     slot->bot_target_z = ((float)(rand() % 2001) / 1000.0f - 1.0f) * half;
     unsigned int span = RC_BOT_RETARGET_MAX_MS - RC_BOT_RETARGET_MIN_MS;
@@ -121,7 +140,7 @@ static void spawn_formation(int slot_index) {
     s->sim.x = sinf(angle) * radius;
     s->sim.z = cosf(angle) * radius;
     s->sim.yaw = angle + (float)M_PI; /* face outward from center, arbitrary but not all-identical */
-    s->sim.y = racer_terrain_height_at(g_heights, s->sim.x, s->sim.z);
+    s->sim.y = active_terrain_height(s->sim.x, s->sim.z);
 }
 
 int main(int argc, char **argv) {
@@ -133,15 +152,30 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--worldapi-host") == 0 && i + 1 < argc) worldapi_host = argv[++i];
         else if (strcmp(argv[i], "--worldapi-port") == 0 && i + 1 < argc) worldapi_port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) server_port = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--track") == 0 && i + 1 < argc) {
+            const char *track = argv[++i];
+            if (strcmp(track, "stadium") == 0) g_track_stadium = 1;
+            else if (strcmp(track, "meadow") != 0) {
+                fprintf(stderr, "--track: unknown track %s -- use meadow or stadium\n", track);
+                return 1;
+            }
+        }
     }
 
-    printf("WEAKNIGHT_BEDROCK_RACERS server (Phase 0, %d-slot bot match) -- fetching real terrain from worldapi %s:%d...\n",
-           RC_MAX_VEHICLES, worldapi_host, worldapi_port);
-    if (!fetch_heightmap(worldapi_host, worldapi_port)) {
-        fprintf(stderr, "FATAL: could not load real terrain from worldapi -- refusing to run on fake/flat ground.\n");
-        return 1;
+    if (g_track_stadium) {
+        printf("WEAKNIGHT_BEDROCK_RACERS server (Phase 0, %d-slot bot match) -- generating real SHANKPIT-ported stadium track (%dx%d)...\n",
+               RC_MAX_VEHICLES, RC_STADIUM_GRID, RC_STADIUM_GRID);
+        rc_stadium_generate_heights(g_stadium_heights, RC_HEIGHT_SCALE);
+        printf("Real stadium heightfield generated.\n");
+    } else {
+        printf("WEAKNIGHT_BEDROCK_RACERS server (Phase 0, %d-slot bot match) -- fetching real terrain from worldapi %s:%d...\n",
+               RC_MAX_VEHICLES, worldapi_host, worldapi_port);
+        if (!fetch_heightmap(worldapi_host, worldapi_port)) {
+            fprintf(stderr, "FATAL: could not load real terrain from worldapi -- refusing to run on fake/flat ground.\n");
+            return 1;
+        }
+        printf("Real Meadow heightmap loaded (256 columns, scene=%d).\n", RC_WORLDAPI_SCENE);
     }
-    printf("Real Meadow heightmap loaded (256 columns, scene=%d).\n", RC_WORLDAPI_SCENE);
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) { perror("socket"); return 1; }
@@ -243,7 +277,7 @@ int main(int argc, char **argv) {
                     int handbrake = (s->latest_buttons & RC_BTN_HANDBRAKE) != 0;
                     racer_vehicle_tick(&s->sim, s->latest_throttle, s->latest_steer, handbrake, RC_TICK_DT);
                 }
-                s->sim.y = racer_terrain_height_at(g_heights, s->sim.x, s->sim.z);
+                s->sim.y = active_terrain_height(s->sim.x, s->sim.z);
             }
 
             if (g_slots[0].active) {
