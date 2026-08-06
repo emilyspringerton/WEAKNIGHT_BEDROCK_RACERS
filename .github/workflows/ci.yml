@@ -1,0 +1,47 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libgl1-mesa-dev libglu1-mesa-dev
+
+      # Phase 0 (see CLAUDE.md/docs/NORTHSTAR.md): a real UDP server + SDL2/GL
+      # client exist and are live-verified end-to-end against
+      # GoblinFoxDragon's real worldapi heightmap endpoint. No packaging/
+      # distribution step exists yet -- unlike REDGARDEN's ci.yml (its own
+      # sibling template this workflow is based on), there's no Windows
+      # cross-compile or artifact bundling here, because nothing in this
+      # repo's own docs claims a distributable build exists yet. Add that
+      # step when Phase 1+ actually needs one, not preemptively.
+      - name: Build server
+        run: |
+          set -euo pipefail
+          gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -O2 \
+            -o racer_server \
+            apps/server/src/main.c \
+            -Ipackages \
+            -lm
+
+      - name: Build client
+        run: |
+          set -euo pipefail
+          gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -O2 \
+            -o racer_client \
+            apps/client/src/main.c \
+            -Ipackages \
+            $(pkg-config --cflags --libs sdl2) \
+            -lGL -lGLU -lm
