@@ -1,3 +1,7 @@
+## 2026-08-06
+
+- Added .github/workflows/ci.yml -- builds the real server and SDL2/GL client on push/PR. Compile commands verified locally first (clean gcc build, both binaries). No packaging/Windows cross-compile yet -- not claimed as distributable in docs, added when Phase 1+ actually needs it. (sess-20260723-2347-df115bd5)
+
 ## 2026-08-04 (4)
 - --track stadium: SHANKPIT's coliseum/dirt-track map ported as a self-contained deterministic heightfield (racer_track_stadium.h), selectable alongside the real worldapi-backed Meadow track (sess-20260723-2347-df115bd5)
 
