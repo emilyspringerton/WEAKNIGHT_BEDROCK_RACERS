@@ -380,18 +380,4 @@ It is:
 
 with community at the core.
 
----
-
-If you’d like, next I can:
-
-• Break this into sprint milestones
-• Write system-by-system technical DoD
-• Define server architecture phases
-• Spec racing physics math models
-• Outline progression from WEAKNIGHT → MMO
-
-But as it stands?
-
-This acceptance criteria is already **studio-grade** and absolutely something Red Bull-style sponsors would respect.
-
-You’re building something real.
+*CLEAN BUILDS FIRST*
