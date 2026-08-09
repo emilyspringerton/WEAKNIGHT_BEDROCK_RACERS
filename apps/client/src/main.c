@@ -23,12 +23,19 @@
 #include <GL/gl.h>
 #include <GL/glu.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <netdb.h>
+#ifdef _WIN32
+    #include <windows.h>
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+    #include <fcntl.h>
+    #include <netdb.h>
+#endif
 
 #include "../../../packages/common/http_client.h"
 #include "../../../packages/common/racer_protocol.h"
@@ -163,6 +170,9 @@ int main(int argc, char **argv) {
         printf("Real Meadow heightmap loaded from worldapi.\n");
     }
 
+#ifdef _WIN32
+    WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) { perror("socket"); return 1; }
     struct sockaddr_in server_addr;
@@ -172,8 +182,13 @@ int main(int argc, char **argv) {
     struct hostent *he = gethostbyname(server_host);
     if (!he) { fprintf(stderr, "FATAL: could not resolve server host %s\n", server_host); return 1; }
     memcpy(&server_addr.sin_addr, he->h_addr, he->h_length);
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(sock, FIONBIO, &mode);
+#else
     int fl = fcntl(sock, F_GETFL, 0);
     fcntl(sock, F_SETFL, fl | O_NONBLOCK);
+#endif
 
     RcHeader connect_hdr; memset(&connect_hdr, 0, sizeof(connect_hdr));
     connect_hdr.type = RC_PACKET_CONNECT;
@@ -359,6 +374,11 @@ int main(int argc, char **argv) {
     SDL_GL_DeleteContext(ctx);
     SDL_DestroyWindow(win);
     SDL_Quit();
+#ifdef _WIN32
+    closesocket(sock);
+    WSACleanup();
+#else
     close(sock);
+#endif
     return 0;
 }

@@ -21,12 +21,7 @@ jobs:
 
       # Phase 0 (see CLAUDE.md/docs/NORTHSTAR.md): a real UDP server + SDL2/GL
       # client exist and are live-verified end-to-end against
-      # GoblinFoxDragon's real worldapi heightmap endpoint. No packaging/
-      # distribution step exists yet -- unlike REDGARDEN's ci.yml (its own
-      # sibling template this workflow is based on), there's no Windows
-      # cross-compile or artifact bundling here, because nothing in this
-      # repo's own docs claims a distributable build exists yet. Add that
-      # step when Phase 1+ actually needs one, not preemptively.
+      # GoblinFoxDragon's real worldapi heightmap endpoint.
       - name: Build server
         run: |
           set -euo pipefail
@@ -45,3 +40,60 @@ jobs:
             -Ipackages \
             $(pkg-config --cflags --libs sdl2) \
             -lGL -lGLU -lm
+
+      # Windows client cross-compile + SDL2 bundle, mirroring SHANKPIT's
+      # release.yml / REDGARDEN's ci.yml (EMILY/BACKLOG.md S170-263 --
+      # founder: "WEAKNIGHT_BEDROCK_RACERS needs build artifacts matching
+      # SHANKPIT/REDGARDEN pattern -- Windows client artifacts, run.bat,
+      # SDL2"). Server stays Linux-only, same as both sibling repos -- only
+      # the client is distributed as a Windows exe. -lglu32 is needed here
+      # (unlike REDGARDEN's shader-based arena client) because this client
+      # uses GL/glu.h directly (see apps/client/src/main.c).
+      - name: Install mingw-w64 + SDL2 mingw devel package
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y mingw-w64 zip
+          rm -rf sdl2_mingw SDL2-2.30.10 SDL2-devel-2.30.10-mingw.tar.gz || true
+          wget -q --timeout=30 --tries=3 --retry-connrefused \
+            https://github.com/libsdl-org/SDL/releases/download/release-2.30.10/SDL2-devel-2.30.10-mingw.tar.gz
+          tar xzf SDL2-devel-2.30.10-mingw.tar.gz
+          mv SDL2-2.30.10/x86_64-w64-mingw32 ./sdl2_mingw
+
+      - name: Cross-compile Windows client
+        run: |
+          set -euo pipefail
+          x86_64-w64-mingw32-gcc -std=c99 -D_DEFAULT_SOURCE -O2 \
+            -o WeaknightRacers.exe \
+            apps/client/src/main.c \
+            -I./sdl2_mingw/include \
+            -Ipackages \
+            -L./sdl2_mingw/lib \
+            -lmingw32 -lSDL2main -lSDL2 \
+            -lopengl32 -lglu32 -lws2_32 -lwinmm -lgdi32 -lm
+
+      - name: Bundle Windows client artifact
+        run: |
+          set -euo pipefail
+          BUILD="build_${{ github.run_number }}_${GITHUB_SHA::7}"
+
+          mkdir -p WeaknightRacers_Client
+          cp WeaknightRacers.exe WeaknightRacers_Client/
+          cp sdl2_mingw/bin/SDL2.dll WeaknightRacers_Client/
+          # No persistent public server deployment exists for this repo yet
+          # (Phase 0, per CLAUDE.md/docs/NORTHSTAR.md) -- unlike REDGARDEN's
+          # PLAY.bat, which points at a real always-on bot-pool IP, this one
+          # defaults to localhost (matching the client's own --server-host/
+          # --worldapi-host defaults) so it does the honest thing: connect to
+          # a server running on the same machine. Update SERVER_HOST once a
+          # real persistent deployment exists.
+          printf '%s\r\n' "@echo off" "set SERVER_HOST=localhost" "set WORLDAPI_HOST=localhost" "WeaknightRacers.exe --server-host %SERVER_HOST% --worldapi-host %WORLDAPI_HOST%" "pause" > WeaknightRacers_Client/run.bat
+          zip -r "WeaknightRacers_Client_${BUILD}.zip" WeaknightRacers_Client
+
+      - name: Upload Windows client artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weaknight-bedrock-racers-client
+          path: WeaknightRacers_Client_*.zip
