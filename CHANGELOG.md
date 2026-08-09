@@ -1,3 +1,7 @@
+## 2026-08-09
+
+- feat(ci): Windows client cross-compile + SDL2 bundle + run.bat, mirroring SHANKPIT/REDGARDEN's proven mingw pattern — added _WIN32/winsock guards to apps/client/src/main.c so it actually cross-compiles; server stays Linux-only, matching both sibling repos (sess-20260809-1420-e9d3d7f8)
+
 ## 2026-08-06
 
 - Added .github/workflows/ci.yml -- builds the real server and SDL2/GL client on push/PR. Compile commands verified locally first (clean gcc build, both binaries). No packaging/Windows cross-compile yet -- not claimed as distributable in docs, added when Phase 1+ actually needs it. (sess-20260723-2347-df115bd5)
