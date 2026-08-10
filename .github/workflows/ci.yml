@@ -89,7 +89,7 @@ jobs:
           # --worldapi-host defaults) so it does the honest thing: connect to
           # a server running on the same machine. Update SERVER_HOST once a
           # real persistent deployment exists.
-          printf '%s\r\n' "@echo off" "set SERVER_HOST=localhost" "set WORLDAPI_HOST=localhost" "WeaknightRacers.exe --server-host %SERVER_HOST% --worldapi-host %WORLDAPI_HOST%" "pause" > WeaknightRacers_Client/run.bat
+          printf '%s\r\n' "@echo off" "set SERVER_HOST=198.58.107.85" "set WORLDAPI_HOST=198.58.107.85" "echo Connecting to okemily.com ..." "WeaknightRacers.exe --server-host %SERVER_HOST% --worldapi-host %WORLDAPI_HOST%" "pause" > WeaknightRacers_Client/run.bat
           zip -r "WeaknightRacers_Client_${BUILD}.zip" WeaknightRacers_Client
 
       - name: Upload Windows client artifact

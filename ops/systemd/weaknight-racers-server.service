@@ -1,0 +1,35 @@
+# WEAKNIGHT_BEDROCK_RACERS game server -- user-level systemd unit (no sudo required)
+#
+# Deploy:
+#   mkdir -p ~/.config/systemd/user
+#   cp ops/systemd/weaknight-racers-server.service ~/.config/systemd/user/
+#   gcc -std=c99 -D_DEFAULT_SOURCE -O2 -o bin/racer_server apps/server/src/main.c -Ipackages -lm
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now weaknight-racers-server.service
+#
+# Added 2026-08-10, same pattern as shankpit-460's own shankpit460-server.service
+# (found live: shankpit-460's manually-launched process fights the already-enabled
+# systemd unit for the same port and crash-loops forever -- not repeating that
+# mistake here, this repo gets a real supervised unit from day one instead of
+# ad-hoc nohup process management).
+#
+# Fetches real terrain from GoblinFoxDragon's worldapi (gfd-server-go.service,
+# already running on :7070) via localhost -- both services live on this same box.
+
+[Unit]
+Description=WEAKNIGHT_BEDROCK_RACERS game server (UDP :7788)
+After=network-online.target gfd-server-go.service
+Wants=gfd-server-go.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fatbaby/WEAKNIGHT_BEDROCK_RACERS
+ExecStart=/home/fatbaby/WEAKNIGHT_BEDROCK_RACERS/bin/racer_server --worldapi-host localhost --worldapi-port 7070
+Restart=on-failure
+RestartSec=10s
+StandardOutput=append:/home/fatbaby/WEAKNIGHT_BEDROCK_RACERS/var/logs/server.log
+StandardError=append:/home/fatbaby/WEAKNIGHT_BEDROCK_RACERS/var/logs/server.log
+MemoryMax=128M
+
+[Install]
+WantedBy=default.target
