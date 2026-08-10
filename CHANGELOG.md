@@ -1,3 +1,7 @@
+## 2026-08-10
+
+- fix(net): run.bat pointed at localhost for both worldapi and the game server, which only ever works for a same-box test client -- every real downloaded client would FATAL on terrain load exactly like today's live report. Fixed to point at the real box (198.58.107.85). Also: neither racer_server nor the CI-built worldapi dependency (GoblinFoxDragon's gfd-server-go.service) were ever actually deployed persistently -- racer_server only existed as a CI build-verification artifact, never run. Built it, stood it up under a new systemd user unit (ops/systemd/weaknight-racers-server.service, same supervised pattern as shankpit-460's own units, Restart=on-failure), confirmed real terrain + bot spawns + 60Hz tick. Live-verified end-to-end against the real public IP (not loopback): heightmap fetch, UDP connect, WELCOME, real snapshot rendering, all confirmed working over the same host the fixed run.bat now uses. (sess-20260809-1420-e9d3d7f8)
+
 ## 2026-08-09
 
 - feat(ci): Windows client cross-compile + SDL2 bundle + run.bat, mirroring SHANKPIT/REDGARDEN's proven mingw pattern — added _WIN32/winsock guards to apps/client/src/main.c so it actually cross-compiles; server stays Linux-only, matching both sibling repos (sess-20260809-1420-e9d3d7f8)
