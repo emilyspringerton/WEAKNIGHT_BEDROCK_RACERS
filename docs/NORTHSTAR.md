@@ -277,3 +277,14 @@ and shipped, not before.
 - Does `worldapi`'s own real heightmap format need a racing-specific extension (banking, elevation
   changes tuned for a track rather than a walkable town), or is Phase 0 fine using whatever terrain
   it already generates as-is? Phase 0 should answer this empirically, not guess up front.
+
+## Real relationship to Papercraft (`skateboard`, 2026-08-28)
+
+Founder real-time, same day as this pivot: *"bedrock racers can evolve into papercraft."*
+`skateboard/NORTHSTAR.md` (newly named **Papercraft**, GTA3 × Skate 2 × non-voxel destructible
+city, TRAPX-universe) is a real, separate product on its own repo/timeline — not a merge, not a
+rename, no hard dependency either direction. Flagged here because this repo's own Phase A work
+(a real city-scale map, real vehicle traversal, PARENA embedded in the gameplay core) is
+independently building toward exactly the kind of foundation Papercraft eventually needs, so a
+future call to converge or diverge should be made with both repos' own real state in view, not
+guessed at from either doc alone. Revisit once this repo's Phase A city work is further along.
