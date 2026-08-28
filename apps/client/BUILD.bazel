@@ -1,0 +1,12 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "racer_client",
+    srcs = ["src/main.c"],
+    deps = [
+        "//packages/common:common_headers",
+        "//packages/simulation:bike_gear",
+    ],
+    linkopts = ["-lSDL2", "-lGL", "-lGLU", "-lm"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,14 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# bike_gear -- the real, PARENA-compiled gear-selection decision logic (Phase A's own first real
+# "PARENA embedded from day one" slice, docs/NORTHSTAR.md PIVOT section). bike_gear_mod.c is
+# GENERATED (`parena build stdlib/racer/bike_gear_mod.prn`, PARENA repo) and committed here per
+# this monorepo's own "generated code committed" precedent (ECOWAR's own card_effect_mod.c) --
+# not regenerated at build time. parena_runtime.h is deliberately minimal, see its own header
+# comment for why this repo doesn't carry PARENA's full runtime.
+cc_library(
+    name = "bike_gear",
+    srcs = ["bike_gear_mod.c"],
+    hdrs = ["parena_runtime.h"],
+    visibility = ["//visibility:public"],
+)

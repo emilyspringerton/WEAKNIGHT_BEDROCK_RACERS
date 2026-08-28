@@ -1,0 +1,18 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+# common_headers -- the real header-only bag every apps/* binary's own relative-path #include
+# ("../../../packages/common/racer_protocol.h" etc.) needs declared as a Bazel input somewhere in
+# its dep graph. Same real shape ECOWAR's own packages/common:common_headers already establishes.
+cc_library(
+    name = "common_headers",
+    hdrs = [
+        "hmac_sha256.h",
+        "http_client.h",
+        "hud_text.h",
+        "mat4.h",
+        "racer_protocol.h",
+        "racer_track_stadium.h",
+        "racer_vehicle.h",
+    ],
+    visibility = ["//visibility:public"],
+)

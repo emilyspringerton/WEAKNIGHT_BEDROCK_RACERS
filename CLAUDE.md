@@ -16,6 +16,18 @@ still real and still deferred, unchanged by this pivot.
 (2026-08-28)" section at the top of that doc is the current, authoritative direction and
 supersedes the original Phase 0-3 sequencing below it (kept for history, not deleted).
 
+## Build
+
+**Bazel** (`bazel build //...`) — the real dependency-graph build, same pattern
+PARENA/ECOWAR/REDGARDEN's own `MODULE.bazel`/`BUILD.bazel` setup already establishes in this
+monorepo (founder, 2026-08-28: "make sure the whole thing is built with bazel"). A binary
+declares its real deps (`//packages/common:common_headers`, `//packages/simulation:bike_gear`);
+a new PARENA mod landing and getting missed in one of several hand-maintained build-path scripts
+— the exact bug class ECOWAR's own CHANGELOG documents hitting twice — is structurally
+impossible once it's a real Bazel dep, not something to remember. `.github/workflows/ci.yml`'s
+own plain `gcc` invocations stay as the fast CI path (same relationship PARENA's own Makefile has
+to its Bazel build), not replaced.
+
 ## Status
 
 **Phase 0 (single-vehicle arcade prototype) shipped 2026-08-04** — real UDP server + SDL2/GL

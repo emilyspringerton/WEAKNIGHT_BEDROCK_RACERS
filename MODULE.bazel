@@ -1,0 +1,22 @@
+"""WEAKNIGHT_BEDROCK_RACERS — the racer server/client under Bazel.
+
+Founder real-time (2026-08-28): "make sure the whole thing is built with bazel." Same real
+precedent PARENA/ECOWAR/REDGARDEN's own MODULE.bazel/BUILD.bazel setup already established in
+this monorepo, not a new pattern invented here -- see ECOWAR's own MODULE.bazel for the fuller
+real motivation (a new PARENA mod landing and getting missed in one of several hand-maintained
+build-path scripts is a real, repeated bug class; a real Bazel dependency graph, where a binary
+depends on a library and that library's own srcs list is the single source of truth, makes that
+whole class structurally impossible). This repo's own `.github/workflows/ci.yml` gcc invocations
+stay as the fast/simple CI path (same relationship PARENA's own plain Makefile has to its Bazel
+build) -- this is the real, equivalent dependency-graph build, not a replacement.
+
+No external dependencies beyond rules_cc -- SDL2/OpenGL/GLU are system libraries, linked via
+linkopts, not fetched by Bazel (same real call ECOWAR's own MODULE.bazel already made).
+"""
+
+module(
+    name = "weaknight_bedrock_racers",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "rules_cc", version = "0.2.17")
