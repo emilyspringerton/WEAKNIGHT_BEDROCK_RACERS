@@ -28,6 +28,7 @@ jobs:
           gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -O2 \
             -o racer_server \
             apps/server/src/main.c \
+            packages/simulation/bike_gear_mod.c \
             -Ipackages \
             -lm
 
@@ -37,6 +38,7 @@ jobs:
           gcc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -O2 \
             -o racer_client \
             apps/client/src/main.c \
+            packages/simulation/bike_gear_mod.c \
             -Ipackages \
             $(pkg-config --cflags --libs sdl2) \
             -lGL -lGLU -lm
@@ -68,6 +70,7 @@ jobs:
           x86_64-w64-mingw32-gcc -std=c99 -D_DEFAULT_SOURCE -O2 \
             -o WeaknightRacers.exe \
             apps/client/src/main.c \
+            packages/simulation/bike_gear_mod.c \
             -I./sdl2_mingw/include \
             -Ipackages \
             -L./sdl2_mingw/lib \

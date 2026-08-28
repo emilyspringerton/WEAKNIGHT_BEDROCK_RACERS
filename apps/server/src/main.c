@@ -72,6 +72,8 @@ typedef struct {
     int active;      /* a vehicle actually exists in this slot */
     int is_bot;
     RcVehicleSimState sim;
+    unsigned char vehicle_type; /* RC_VEH_* -- see racer_protocol.h's own doc comment */
+    int gear;                   /* RC_VEH_BIKE only, real PARENA-decided state; unused (0) for RC_VEH_BUGGY */
 
     /* Human-only fields */
     struct sockaddr_in addr;
@@ -189,7 +191,12 @@ static void pick_bot_waypoint(VehicleSlot *slot, unsigned int now) {
 }
 
 /* spawn_formation: spreads all RC_MAX_VEHICLES slots around a circle at match start so nobody
- * begins stacked on top of another car -- real starting positions, not all zeroed to the origin. */
+ * begins stacked on top of another car -- real starting positions, not all zeroed to the origin.
+ *
+ * Slot 0 (always the human) spawns on the real BIKE archetype -- the 5-speed, PARENA-gear-decided
+ * model this pivot is actually about (docs/NORTHSTAR.md PIVOT section). Bots stay on the existing
+ * BUGGY model, unchanged -- proving the new mechanic on the one slot a real player actually
+ * drives, without touching the already-working bot AI/tick path. */
 static void spawn_formation(int slot_index) {
     float angle = (float)slot_index / (float)RC_MAX_VEHICLES * 2.0f * (float)M_PI;
     float radius = 14.0f;
@@ -199,6 +206,8 @@ static void spawn_formation(int slot_index) {
     s->sim.z = cosf(angle) * radius;
     s->sim.yaw = angle + (float)M_PI; /* face outward from center, arbitrary but not all-identical */
     s->sim.y = active_terrain_height(s->sim.x, s->sim.z);
+    s->vehicle_type = (slot_index == 0) ? RC_VEH_BIKE : RC_VEH_BUGGY;
+    s->gear = (s->vehicle_type == RC_VEH_BIKE) ? 1 : 0;
 }
 
 int main(int argc, char **argv) {
@@ -355,6 +364,16 @@ int main(int argc, char **argv) {
                     racer_bot_drive_toward(&s->sim, s->bot_target_x, s->bot_target_z, &throttle, &steer);
                     (void)buttons_handbrake; /* bots don't handbrake yet -- real future refinement, not faked here */
                     racer_vehicle_tick(&s->sim, throttle, steer, 0, RC_TICK_DT);
+                } else if (s->vehicle_type == RC_VEH_BIKE) {
+                    /* No handbrake on the BIKE model yet -- a real bike doesn't handbrake-turn the
+                       way a car does, and the reference construct's own bike never modeled one
+                       either; RC_BTN_HANDBRAKE input is simply ignored here for now. */
+                    RcBikeState bs;
+                    bs.sim = s->sim;
+                    bs.gear = s->gear;
+                    racer_bike_tick(&bs, s->latest_throttle, s->latest_steer, RC_TICK_DT);
+                    s->sim = bs.sim;
+                    s->gear = bs.gear;
                 } else {
                     int handbrake = (s->latest_buttons & RC_BTN_HANDBRAKE) != 0;
                     racer_vehicle_tick(&s->sim, s->latest_throttle, s->latest_steer, handbrake, RC_TICK_DT);
@@ -377,6 +396,8 @@ int main(int argc, char **argv) {
                     snap.vehicles[i].z = g_slots[i].sim.z;
                     snap.vehicles[i].yaw = g_slots[i].sim.yaw;
                     snap.vehicles[i].speed = g_slots[i].sim.speed;
+                    snap.vehicles[i].vehicle_type = g_slots[i].vehicle_type;
+                    snap.vehicles[i].gear = (unsigned char)g_slots[i].gear;
                 }
                 sendto(sock, &snap, sizeof(snap), 0, (struct sockaddr *)&g_slots[0].addr, g_slots[0].addr_len);
             }

@@ -87,10 +87,22 @@ typedef struct {
     unsigned int buttons; /* RC_BTN_* bitmask -- handbrake today, room for more without a wire break */
 } RcUserCmdPacket;
 
+/* Two real vehicle classes (2026-08-28 pivot -- docs/NORTHSTAR.md PIVOT section, "its like 2
+ * different gears in a car almost and the driving is crisp"): RC_VEH_BUGGY is the existing
+ * flat-rate Phase 0 model (packages/common/racer_vehicle.h's own racer_vehicle_tick);
+ * RC_VEH_BIKE is the new 5-speed-gearbox model (racer_bike_tick), its gear selection decided by
+ * a real PARENA-compiled function. gear is only meaningful when vehicle_type == RC_VEH_BIKE
+ * (always 0 for a buggy) -- sent in every snapshot so the client can show it on the HUD, a real
+ * player-visible signal for "the shifting matters," not just an internal server detail. */
+#define RC_VEH_BUGGY 0
+#define RC_VEH_BIKE  1
+
 typedef struct {
     float x, y, z;
     float yaw;   /* radians, world-space heading */
     float speed; /* world units/sec, signed (negative = reversing) */
+    unsigned char vehicle_type; /* RC_VEH_* */
+    unsigned char gear;         /* 1..RC_BIKE_GEARS for RC_VEH_BIKE, 0 otherwise */
 } RcVehicleState;
 
 /* RC_MAX_VEHICLES (2026-08-04, founder: "can we get 8 player online bot matches? same pattern as
