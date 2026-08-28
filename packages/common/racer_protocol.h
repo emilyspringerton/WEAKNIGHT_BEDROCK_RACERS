@@ -22,6 +22,20 @@
 #define RC_PACKET_WELCOME  1
 #define RC_PACKET_USERCMD  2
 #define RC_PACKET_SNAPSHOT 3
+#define RC_PACKET_REJECT   4 /* real rejection, not a silent drop -- see RcConnectPacket's own doc comment */
+
+/* Connect-ticket auth (2026-08-28, "build login from the beginning take it from GFD") -- direct
+ * port of shankpit-460's own real, proven wire format (apps/server/src/main.c's own
+ * TICKET_PAYLOAD_LEN/TICKET_MAC_LEN/TICKET_TOTAL_LEN), not a new design. Minted by IDUNA's
+ * RacerTicketHandler (internal/http/handlers/racer_ticket.go) from a real player JWT (itself from
+ * POST /api/v1/auth/email/login -- GFD's own apps2/battlegrounds_gui login-screen pattern, ported
+ * into apps/client below). player_id(16) + expires_at(4, LE u32) + hmac_sha256(secret,
+ * player_id||expires_at) truncated to 16 bytes = 36 raw bytes, appended after RcConnectPacket's
+ * own header. Both sides must agree on RACER_TICKET_SECRET byte-for-byte (raw string bytes, not
+ * hex-decoded -- see racer_ticket.go's own doc comment). */
+#define RC_TICKET_PAYLOAD_LEN 20 /* player_id(16) + expires_at(4) */
+#define RC_TICKET_MAC_LEN     16 /* truncated HMAC-SHA256 */
+#define RC_TICKET_TOTAL_LEN   (RC_TICKET_PAYLOAD_LEN + RC_TICKET_MAC_LEN) /* 36 */
 
 #define RC_WORLDAPI_SCENE 0 /* Meadow -- real gentle rolling terrain, per worldapi's own scene table */
 #define RC_HEIGHTMAP_GRID 16
@@ -34,14 +48,33 @@ typedef struct {
     unsigned int sequence;
 } RcHeader;
 
+/* RcConnectPacket now carries a real ticket, not just a bare header -- an anonymous, ticketless
+ * CONNECT (Phase 0's own original shape) is no longer accepted once RACER_TICKET_SECRET is
+ * configured server-side (fail closed, matching shankpit-460's own verify_connect_ticket
+ * discipline: an unset secret rejects everything rather than silently accepting unauthenticated
+ * connects). */
 typedef struct {
     RcHeader hdr;
+    unsigned char ticket[RC_TICKET_TOTAL_LEN];
 } RcConnectPacket;
 
 typedef struct {
     RcHeader hdr;
     unsigned char client_id;
 } RcWelcomePacket;
+
+/* RcRejectPacket -- sent once, unreliably (UDP, no retry), when a CONNECT's ticket fails
+ * verification (bad signature, expired, or no secret configured server-side) or when
+ * RC_MAX_VEHICLES has no free human slot. reason is a short human-readable string the client
+ * shows directly, not an error code -- this repo is small enough that a real client and a real
+ * server are always built from the same source tree, so wire-stability across independent
+ * client/server versions isn't a real constraint the way it is for shankpit-460's own
+ * multi-version fleet. */
+#define RC_REJECT_REASON_MAX 63
+typedef struct {
+    RcHeader hdr;
+    char reason[RC_REJECT_REASON_MAX + 1];
+} RcRejectPacket;
 
 #define RC_BTN_HANDBRAKE 1
 

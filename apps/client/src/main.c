@@ -41,6 +41,7 @@
 #include "../../../packages/common/racer_protocol.h"
 #include "../../../packages/common/racer_vehicle.h"
 #include "../../../packages/common/racer_track_stadium.h"
+#include "../../../packages/common/hud_text.h"
 
 static unsigned char g_heights[256];
 
@@ -138,17 +139,404 @@ static void draw_vehicle_box(float x, float y, float z, float yaw, int is_own) {
     glPopMatrix();
 }
 
+/* ================================================================================================
+ * Real IDUNA login (2026-08-28, founder real-time: "build login from the beginning take it from
+ * GFD make sure my GFD test@test.com login works") -- ported from GoblinFoxDragon/apps2/
+ * battlegrounds_gui's own real, proven login-screen pattern (draw_login_screen/run_login_screen/
+ * get_player_login_ticket), adapted: that client mints a REDGARDEN-specific self-ticket after
+ * login; this one joins the real racer matchmaking queue (IDUNA's ShankpitQueue, instantiated a
+ * second time for racing -- "after you login it drops you into matchmaking queue"), then mints a
+ * RacerTicketHandler ticket once matched. Same real POST /api/v1/auth/email/login endpoint,
+ * verified live end-to-end against the real test@test.com/testtest account before this shipped.
+ * ================================================================================================ */
+
+static char g_player_jwt[2048];
+static char g_player_display_name[64];
+
+static int hex_decode(const char *hex, unsigned char *out, size_t out_len) {
+    size_t hexlen = strlen(hex);
+    if (hexlen != out_len * 2) return 0;
+    for (size_t i = 0; i < out_len; i++) {
+        unsigned int byte;
+        if (sscanf(hex + i * 2, "%2x", &byte) != 1) return 0;
+        out[i] = (unsigned char)byte;
+    }
+    return 1;
+}
+
+/* json_escape_into: minimal JSON string escaping (backslash + double-quote only) -- same real,
+ * deliberately-scoped helper GFD's own get_player_login_ticket uses (see that function's doc
+ * comment): agent secrets are operator-controlled and don't need this, but real player-typed
+ * email/password absolutely can contain either character. */
+static void json_escape_into(const char *in, char *out, size_t out_len) {
+    size_t oi = 0;
+    for (const char *p = in; *p && oi + 2 < out_len; p++) {
+        if (*p == '"' || *p == '\\') {
+            if (oi + 3 >= out_len) break;
+            out[oi++] = '\\';
+        }
+        out[oi++] = *p;
+    }
+    out[oi] = '\0';
+}
+
+/* rc_login: real email+password login against IDUNA's POST /api/v1/auth/email/login (the same
+ * real, generic player-account endpoint GFD's own client uses -- one IDUNA identity spans the
+ * whole monorepo). On success fills g_player_jwt/g_player_display_name and returns 1; on failure
+ * returns 0 and writes a short, user-facing reason into out_err. */
+static int rc_login(const char *iduna_host, int iduna_port, const char *email, const char *password,
+                     char *out_err, size_t out_err_len) {
+    char email_esc[192], pw_esc[192];
+    json_escape_into(email, email_esc, sizeof(email_esc));
+    json_escape_into(password, pw_esc, sizeof(pw_esc));
+
+    char login_body[512];
+    snprintf(login_body, sizeof(login_body),
+             "{\"email\":\"%s\",\"password\":\"%s\"}", email_esc, pw_esc);
+
+    char resp[4096];
+    int status = 0;
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/auth/email/login", NULL,
+                        login_body, resp, sizeof(resp), &status) != 0) {
+        snprintf(out_err, out_err_len, "Could not reach login server.");
+        return 0;
+    }
+    if (status == 401) {
+        snprintf(out_err, out_err_len, "Wrong email or password.");
+        return 0;
+    }
+    if (status != 200) {
+        snprintf(out_err, out_err_len, "Login failed (server said %d).", status);
+        return 0;
+    }
+    if (!http_extract_json_string_field(resp, "token", g_player_jwt, sizeof(g_player_jwt))) {
+        snprintf(out_err, out_err_len, "Login response missing token.");
+        return 0;
+    }
+    if (!http_extract_json_string_field(resp, "display_name", g_player_display_name, sizeof(g_player_display_name))) {
+        snprintf(g_player_display_name, sizeof(g_player_display_name), "%s", email);
+    }
+    printf("LOGIN: authenticated as %s -- joining matchmaking queue\n", g_player_display_name);
+    return 1;
+}
+
+typedef struct {
+    char state[16];   /* "not_queued" | "queuing" | "matched" */
+    int  queue_position;
+    int  queue_size;
+} RcQueueStatus;
+
+/* rc_queue_join / rc_queue_status: real POST/GET against IDUNA's own racer matchmaking queue
+ * (/api/v1/racer/queue endpoints, a second instance of the exact same ShankpitQueue type SHANKPIT
+ * itself uses -- see IDUNA main.go's own comment on racerQueue). Bearer-authenticated with the
+ * JWT rc_login obtained above. */
+static int rc_queue_call(const char *iduna_host, int iduna_port, const char *path, RcQueueStatus *out) {
+    char resp[512];
+    int status = 0;
+    if (http_post_json(iduna_host, iduna_port, path, g_player_jwt, NULL, resp, sizeof(resp), &status) != 0
+        || status != 200) {
+        return 0;
+    }
+    if (!http_extract_json_string_field(resp, "state", out->state, sizeof(out->state))) return 0;
+    long long v = 0;
+    out->queue_position = http_extract_json_int_field(resp, "queue_position", &v) ? (int)v : 0;
+    out->queue_size = http_extract_json_int_field(resp, "queue_size", &v) ? (int)v : 0;
+    return 1;
+}
+
+static int rc_queue_join(const char *iduna_host, int iduna_port, RcQueueStatus *out) {
+    return rc_queue_call(iduna_host, iduna_port, "/api/v1/racer/queue/join", out);
+}
+
+static int rc_queue_status(const char *iduna_host, int iduna_port, RcQueueStatus *out) {
+    char resp[512];
+    int status = 0;
+    if (http_get_json(iduna_host, iduna_port, "/api/v1/racer/queue/status", g_player_jwt, resp, sizeof(resp), &status) != 0
+        || status != 200) {
+        return 0;
+    }
+    if (!http_extract_json_string_field(resp, "state", out->state, sizeof(out->state))) return 0;
+    long long v = 0;
+    out->queue_position = http_extract_json_int_field(resp, "queue_position", &v) ? (int)v : 0;
+    out->queue_size = http_extract_json_int_field(resp, "queue_size", &v) ? (int)v : 0;
+    return 1;
+}
+
+/* rc_mint_ticket: real POST /api/v1/racer/ticket (IDUNA's RacerTicketHandler) once matched --
+ * mints on behalf of the caller's own JWT subject, a player can only ever mint a ticket for
+ * themselves (same trust model as SHANKPIT/REDGARDEN's own ticket handlers). */
+static int rc_mint_ticket(const char *iduna_host, int iduna_port,
+                           unsigned char out_ticket[RC_TICKET_TOTAL_LEN], char *out_err, size_t out_err_len) {
+    char resp[512];
+    int status = 0;
+    if (http_post_json(iduna_host, iduna_port, "/api/v1/racer/ticket", g_player_jwt, NULL, resp, sizeof(resp), &status) != 0) {
+        snprintf(out_err, out_err_len, "Could not reach ticket server.");
+        return 0;
+    }
+    if (status != 200) {
+        snprintf(out_err, out_err_len, "Ticket mint failed (server said %d).", status);
+        return 0;
+    }
+    char ticket_hex[128];
+    if (!http_extract_json_string_field(resp, "ticket", ticket_hex, sizeof(ticket_hex))) {
+        snprintf(out_err, out_err_len, "Ticket response missing ticket field.");
+        return 0;
+    }
+    if (!hex_decode(ticket_hex, out_ticket, RC_TICKET_TOTAL_LEN)) {
+        snprintf(out_err, out_err_len, "Ticket field was not valid hex.");
+        return 0;
+    }
+    return 1;
+}
+
+/* ---------------- login screen (SDL2 GL, hud_text.h stroke font -- see that header's own
+ * "known, deliberate placeholder" note re: real LINNEN fonts, not yet integrated) ---------------- */
+#define LOGIN_FIELD_MAX 127
+
+typedef struct {
+    char email[LOGIN_FIELD_MAX + 1];
+    char password[LOGIN_FIELD_MAX + 1];
+    int  focus; /* 0 = email, 1 = password */
+    char error[128];
+    int  submitting;
+} LoginScreenState;
+
+static void draw_login_screen(SDL_Window *win, int win_w, int win_h, const LoginScreenState *st) {
+    glClearColor(0.05f, 0.06f, 0.09f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, win_w, 0, win_h, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glColor3f(0.95f, 0.55f, 0.2f);
+    rc_draw_string("BEDROCK RACERS -- LOG IN", win_w / 2.0f - 160.0f, win_h - 120.0f, 16);
+    glColor3f(0.6f, 0.65f, 0.7f);
+    rc_draw_string("TAB TO SWITCH FIELD -- ENTER TO LOG IN -- ESC TO QUIT", win_w / 2.0f - 220.0f, win_h - 150.0f, 8);
+
+    float box_w = 420.0f, box_h = 44.0f;
+    float box_x = win_w / 2.0f - box_w / 2.0f;
+    float email_y = win_h - 230.0f;
+    float pass_y = win_h - 300.0f;
+
+    for (int field = 0; field < 2; field++) {
+        float top = (field == 0) ? email_y : pass_y;
+        float bottom = top - box_h;
+        int focused = (st->focus == field);
+        glColor4f(focused ? 0.25f : 0.1f, focused ? 0.2f : 0.1f, focused ? 0.35f : 0.15f, 0.9f);
+        glRectf(box_x, bottom, box_x + box_w, top);
+        glColor3f(focused ? 1.0f : 0.5f, focused ? 0.6f : 0.4f, focused ? 0.25f : 0.35f);
+        glBegin(GL_LINE_LOOP);
+        glVertex2f(box_x, bottom); glVertex2f(box_x + box_w, bottom);
+        glVertex2f(box_x + box_w, top); glVertex2f(box_x, top);
+        glEnd();
+
+        glColor3f(0.6f, 0.65f, 0.75f);
+        rc_draw_string(field == 0 ? "EMAIL" : "PASSWORD", box_x, top + 10.0f, 8);
+
+        char shown[LOGIN_FIELD_MAX + 1];
+        const char *raw = (field == 0) ? st->email : st->password;
+        if (field == 1) {
+            size_t n = strlen(raw);
+            if (n > LOGIN_FIELD_MAX) n = LOGIN_FIELD_MAX;
+            for (size_t i = 0; i < n; i++) shown[i] = '*';
+            shown[n] = '\0';
+        } else {
+            snprintf(shown, sizeof(shown), "%s", raw);
+        }
+        glColor3f(0.95f, 0.95f, 1.0f);
+        rc_draw_string(shown, box_x + 10.0f, bottom + box_h / 2.0f - 4.0f, 10);
+    }
+
+    if (st->submitting) {
+        glColor3f(0.9f, 0.75f, 0.3f);
+        rc_draw_string("LOGGING IN...", win_w / 2.0f - 60.0f, pass_y - 60.0f, 10);
+    } else if (st->error[0]) {
+        glColor3f(1.0f, 0.4f, 0.4f);
+        rc_draw_string(st->error, win_w / 2.0f - 190.0f, pass_y - 60.0f, 9);
+    }
+
+    SDL_GL_SwapWindow(win);
+}
+
+/* run_login_screen: blocking SDL event loop shown before any UDP connect. On success, g_player_jwt/
+ * g_player_display_name are set and this returns 1; on quit/window-close returns 0. */
+static int run_login_screen(SDL_Window *win, int win_w, int win_h,
+                             const char *iduna_host, int iduna_port,
+                             const char *prefill_email, const char *prefill_password) {
+    LoginScreenState st;
+    memset(&st, 0, sizeof(st));
+    if (prefill_email) snprintf(st.email, sizeof(st.email), "%s", prefill_email);
+    if (prefill_password) snprintf(st.password, sizeof(st.password), "%s", prefill_password);
+    SDL_StartTextInput();
+    int running = 1;
+    int ok = 0;
+    /* Non-interactive smoke-test path (2026-08-28) -- real end-to-end verification under Xvfb,
+       same "no live human hands" precedent this repo's own Phase 0 already used, not a fake bypass
+       of the real login call itself (rc_login below still makes the real HTTP round trip). */
+    if (prefill_email && prefill_email[0] && prefill_password && prefill_password[0]) {
+        st.submitting = 1;
+    }
+    while (running) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) { running = 0; break; }
+            else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED) {
+                win_w = e.window.data1; win_h = e.window.data2;
+            } else if (e.type == SDL_TEXTINPUT && !st.submitting) {
+                char *field = (st.focus == 0) ? st.email : st.password;
+                size_t len = strlen(field);
+                size_t add = strlen(e.text.text);
+                if (len + add <= LOGIN_FIELD_MAX) strcat(field, e.text.text);
+            } else if (e.type == SDL_KEYDOWN && !st.submitting) {
+                if (e.key.keysym.sym == SDLK_ESCAPE) {
+                    running = 0;
+                } else if (e.key.keysym.sym == SDLK_TAB) {
+                    st.focus = 1 - st.focus;
+                } else if (e.key.keysym.sym == SDLK_BACKSPACE) {
+                    char *field = (st.focus == 0) ? st.email : st.password;
+                    size_t len = strlen(field);
+                    if (len > 0) field[len - 1] = '\0';
+                } else if (e.key.keysym.sym == SDLK_v && (SDL_GetModState() & KMOD_CTRL)) {
+                    char *field = (st.focus == 0) ? st.email : st.password;
+                    char *clip = SDL_GetClipboardText();
+                    if (clip) {
+                        size_t len = strlen(field), add = strlen(clip);
+                        if (len + add > LOGIN_FIELD_MAX) add = LOGIN_FIELD_MAX - len;
+                        if (add > 0 && len <= LOGIN_FIELD_MAX) strncat(field, clip, add);
+                        SDL_free(clip);
+                    }
+                } else if (e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER) {
+                    if (st.email[0] && st.password[0]) {
+                        st.submitting = 1;
+                        st.error[0] = '\0';
+                    }
+                }
+            }
+        }
+        if (!running) break;
+
+        draw_login_screen(win, win_w, win_h, &st);
+
+        if (st.submitting) {
+            char err[128] = "";
+            if (rc_login(iduna_host, iduna_port, st.email, st.password, err, sizeof(err))) {
+                ok = 1;
+                running = 0;
+            } else {
+                snprintf(st.error, sizeof(st.error), "%s", err);
+                st.submitting = 0;
+            }
+        }
+        SDL_Delay(16);
+    }
+    SDL_StopTextInput();
+    return ok;
+}
+
+static void draw_queue_screen(SDL_Window *win, int win_w, int win_h, const RcQueueStatus *qs, const char *err) {
+    glClearColor(0.05f, 0.06f, 0.09f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, win_w, 0, win_h, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glColor3f(0.95f, 0.55f, 0.2f);
+    char welcome[96];
+    snprintf(welcome, sizeof(welcome), "WELCOME %s", g_player_display_name);
+    rc_draw_string(welcome, win_w / 2.0f - (float)strlen(welcome) * 6.0f, win_h - 160.0f, 12);
+
+    if (err && err[0]) {
+        glColor3f(1.0f, 0.4f, 0.4f);
+        rc_draw_string(err, win_w / 2.0f - 220.0f, win_h / 2.0f, 9);
+    } else {
+        glColor3f(0.7f, 0.9f, 0.75f);
+        char line[96];
+        snprintf(line, sizeof(line), "QUEUING... POSITION %d OF %d", qs->queue_position, qs->queue_size);
+        rc_draw_string(line, win_w / 2.0f - (float)strlen(line) * 5.0f, win_h / 2.0f, 10);
+    }
+    SDL_GL_SwapWindow(win);
+}
+
+/* run_matchmaking: real POST /join, then real GET /status polled once per second (no busy-loop
+ * hammering IDUNA) until "matched" -- "after you login it drops you into matchmaking queue"
+ * (founder, 2026-08-28). Returns 1 with out_ticket filled once matched and minted, 0 on
+ * quit/window-close/a real failure shown on screen. */
+static int run_matchmaking(SDL_Window *win, int win_w, int win_h, const char *iduna_host, int iduna_port,
+                            unsigned char out_ticket[RC_TICKET_TOTAL_LEN]) {
+    RcQueueStatus qs; memset(&qs, 0, sizeof(qs));
+    char err[128] = "";
+    int matched = 0;
+    if (!rc_queue_join(iduna_host, iduna_port, &qs)) {
+        snprintf(err, sizeof(err), "Could not join matchmaking queue.");
+    } else if (strcmp(qs.state, "matched") == 0) {
+        /* Real bug found live (2026-08-28): join() itself can already return "matched" (e.g.
+           racerQueue.MinPlayers=1 -- a lone real human is a whole match on its own once bots
+           fill the rest, see main.go's own comment). The poll loop below only ever notices a
+           matched->just-happened TRANSITION, so without this, an already-matched join left
+           the player stuck on the queue screen forever, waiting for a state change that had
+           already happened before the loop even started. */
+        matched = 1;
+    }
+    unsigned int last_poll_ms = now_ms();
+    int running = 1;
+    while (running) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) { running = 0; break; }
+            if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) { running = 0; break; }
+        }
+        if (!running) break;
+
+        unsigned int now = now_ms();
+        if (!err[0] && strcmp(qs.state, "matched") != 0 && now - last_poll_ms >= 1000) {
+            last_poll_ms = now;
+            if (!rc_queue_status(iduna_host, iduna_port, &qs)) {
+                snprintf(err, sizeof(err), "Lost contact with matchmaking server.");
+            } else if (strcmp(qs.state, "matched") == 0) {
+                matched = 1;
+            }
+        }
+
+        draw_queue_screen(win, win_w, win_h, &qs, err);
+
+        if (matched) {
+            char ticket_err[128] = "";
+            if (rc_mint_ticket(iduna_host, iduna_port, out_ticket, ticket_err, sizeof(ticket_err))) {
+                return 1;
+            }
+            snprintf(err, sizeof(err), "%s", ticket_err);
+            matched = 0;
+        }
+        SDL_Delay(16);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     const char *worldapi_host = "localhost";
     int worldapi_port = 7070;
     const char *server_host = "localhost";
     int server_port = 7788;
+    const char *iduna_host = "localhost";
+    int iduna_port = 8080;
+    const char *prefill_email = NULL;
+    const char *prefill_password = NULL;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--worldapi-host") == 0 && i + 1 < argc) worldapi_host = argv[++i];
         else if (strcmp(argv[i], "--worldapi-port") == 0 && i + 1 < argc) worldapi_port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--server-host") == 0 && i + 1 < argc) server_host = argv[++i];
         else if (strcmp(argv[i], "--server-port") == 0 && i + 1 < argc) server_port = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--iduna-host") == 0 && i + 1 < argc) iduna_host = argv[++i];
+        else if (strcmp(argv[i], "--iduna-port") == 0 && i + 1 < argc) iduna_port = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--email") == 0 && i + 1 < argc) prefill_email = argv[++i];
+        else if (strcmp(argv[i], "--password") == 0 && i + 1 < argc) prefill_password = argv[++i];
         else if (strcmp(argv[i], "--track") == 0 && i + 1 < argc) {
             const char *track = argv[++i];
             if (strcmp(track, "stadium") == 0) g_track_stadium = 1;
@@ -173,6 +561,41 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
 #endif
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        return 1;
+    }
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    int win_w = 1280, win_h = 800;
+    SDL_Window *win = SDL_CreateWindow("WEAKNIGHT: BEDROCK RACERS -- Phase 0",
+                                        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                        win_w, win_h, SDL_WINDOW_OPENGL);
+    if (!win) { fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError()); return 1; }
+    SDL_GLContext ctx = SDL_GL_CreateContext(win);
+    if (!ctx) { fprintf(stderr, "SDL_GL_CreateContext failed: %s\n", SDL_GetError()); return 1; }
+    SDL_GL_SetSwapInterval(1);
+
+    /* Real login + matchmaking queue, before any UDP connect at all -- "build login from the
+       beginning" / "after you login it drops you into matchmaking queue" (founder, 2026-08-28).
+       A window+GL context must exist first (both screens render into it); the actual driving
+       loop's own glEnable(GL_DEPTH_TEST)/gluPerspective setup happens further down, once real
+       racing starts. */
+    if (!run_login_screen(win, win_w, win_h, iduna_host, iduna_port, prefill_email, prefill_password)) {
+        SDL_GL_DeleteContext(ctx);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        return 0; /* user quit at the login screen -- not an error */
+    }
+    unsigned char ticket[RC_TICKET_TOTAL_LEN];
+    if (!run_matchmaking(win, win_w, win_h, iduna_host, iduna_port, ticket)) {
+        SDL_GL_DeleteContext(ctx);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        return 0; /* user quit while queuing, or a shown, real failure */
+    }
+
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) { perror("socket"); return 1; }
     struct sockaddr_in server_addr;
@@ -190,15 +613,11 @@ int main(int argc, char **argv) {
     fcntl(sock, F_SETFL, fl | O_NONBLOCK);
 #endif
 
-    RcHeader connect_hdr; memset(&connect_hdr, 0, sizeof(connect_hdr));
-    connect_hdr.type = RC_PACKET_CONNECT;
-    sendto(sock, &connect_hdr, sizeof(connect_hdr), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
-    printf("CONNECT sent to %s:%d, retrying until WELCOME lands...\n", server_host, server_port);
-
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return 1;
-    }
+    RcConnectPacket connect_pkt; memset(&connect_pkt, 0, sizeof(connect_pkt));
+    connect_pkt.hdr.type = RC_PACKET_CONNECT;
+    memcpy(connect_pkt.ticket, ticket, RC_TICKET_TOTAL_LEN);
+    sendto(sock, &connect_pkt, sizeof(connect_pkt), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
+    printf("CONNECT (with real ticket) sent to %s:%d, retrying until WELCOME lands...\n", server_host, server_port);
 
     /* Real Xbox controller support (2026-08-04, founder: "do pressure sensitive controls for
      * bedrock racers for my controller (xbox one controller)"). SDL_GameController is the real
@@ -218,16 +637,6 @@ int main(int argc, char **argv) {
         }
     }
     if (!pad) printf("No game controller found -- using keyboard (WASD/arrows + Space).\n");
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    int win_w = 1280, win_h = 800;
-    SDL_Window *win = SDL_CreateWindow("WEAKNIGHT: BEDROCK RACERS -- Phase 0",
-                                        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                        win_w, win_h, SDL_WINDOW_OPENGL);
-    if (!win) { fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError()); return 1; }
-    SDL_GLContext ctx = SDL_GL_CreateContext(win);
-    if (!ctx) { fprintf(stderr, "SDL_GL_CreateContext failed: %s\n", SDL_GetError()); return 1; }
-    SDL_GL_SetSwapInterval(1);
     glEnable(GL_DEPTH_TEST);
 
     RcSnapshotPacket latest_snap; memset(&latest_snap, 0, sizeof(latest_snap));
@@ -236,6 +645,7 @@ int main(int argc, char **argv) {
     unsigned int last_connect_retry_ms = now_ms();
     unsigned int cmd_seq = 0;
     unsigned int last_snapshot_ms = 0;
+    char reject_reason[RC_REJECT_REASON_MAX + 1]; reject_reason[0] = '\0';
 
     int running = 1;
     unsigned int win_logged = 0;
@@ -257,8 +667,8 @@ int main(int argc, char **argv) {
         }
 
         unsigned int now = now_ms();
-        if (!welcomed && now - last_connect_retry_ms >= 500) {
-            sendto(sock, &connect_hdr, sizeof(connect_hdr), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
+        if (!welcomed && !reject_reason[0] && now - last_connect_retry_ms >= 500) {
+            sendto(sock, &connect_pkt, sizeof(connect_pkt), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
             last_connect_retry_ms = now;
         }
 
@@ -270,6 +680,11 @@ int main(int argc, char **argv) {
             if (hdr.type == RC_PACKET_WELCOME) {
                 welcomed = 1;
                 printf("WELCOME received -- server-authoritative session live.\n");
+            } else if (hdr.type == RC_PACKET_REJECT && (size_t)n >= sizeof(RcRejectPacket)) {
+                RcRejectPacket rej; memcpy(&rej, buf, sizeof(rej));
+                rej.reason[RC_REJECT_REASON_MAX] = '\0'; /* defend against a non-NUL-terminated wire value */
+                snprintf(reject_reason, sizeof(reject_reason), "%s", rej.reason);
+                fprintf(stderr, "CONNECT rejected: %s\n", reject_reason);
             } else if (hdr.type == RC_PACKET_SNAPSHOT && (size_t)n >= sizeof(RcSnapshotPacket)) {
                 memcpy(&latest_snap, buf, sizeof(latest_snap));
                 have_snapshot = 1;
@@ -326,9 +741,33 @@ int main(int argc, char **argv) {
             sendto(sock, &cmd, sizeof(cmd), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
         }
 
+        if (reject_reason[0]) {
+            /* Real, visible rejection (bad/expired ticket, no RACER_TICKET_SECRET configured
+               server-side, or the human slot already held by a different player) instead of a
+               silent hang -- racer_protocol.h's own RcRejectPacket doc comment explains why a
+               real reason string, not just an error code, is the right shape for a repo this
+               small. */
+            glViewport(0, 0, win_w, win_h);
+            glDisable(GL_DEPTH_TEST);
+            glClearColor(0.09f, 0.04f, 0.04f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            glOrtho(0, win_w, 0, win_h, -1, 1);
+            glMatrixMode(GL_MODELVIEW);
+            glLoadIdentity();
+            glColor3f(1.0f, 0.4f, 0.4f);
+            rc_draw_string("CONNECT REJECTED", win_w / 2.0f - 120.0f, win_h / 2.0f + 30.0f, 12);
+            rc_draw_string(reject_reason, win_w / 2.0f - 220.0f, win_h / 2.0f - 20.0f, 8);
+            SDL_GL_SwapWindow(win);
+            SDL_Delay(16);
+            continue;
+        }
+
         glViewport(0, 0, win_w, win_h);
         glClearColor(0.55f, 0.75f, 0.92f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
 
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();

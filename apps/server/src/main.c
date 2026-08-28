@@ -38,6 +38,7 @@
 #include "../../../packages/common/racer_protocol.h"
 #include "../../../packages/common/racer_vehicle.h"
 #include "../../../packages/common/racer_track_stadium.h"
+#include "../../../packages/common/hmac_sha256.h"
 
 #define RC_SERVER_PORT 7788
 #define RC_TICK_HZ 60
@@ -79,6 +80,8 @@ typedef struct {
     unsigned int latest_buttons;
     unsigned int latest_cmd_seq;
     unsigned int last_usercmd_ms;
+    int has_player_id;
+    unsigned char player_id[16]; /* real IDUNA player UUID bytes, from a verified connect ticket */
 
     /* Bot-only fields */
     float bot_target_x, bot_target_z;
@@ -86,6 +89,61 @@ typedef struct {
 } VehicleSlot;
 
 static VehicleSlot g_slots[RC_MAX_VEHICLES];
+
+/* Connect-ticket secret (2026-08-28, "build login from the beginning take it from GFD") -- direct
+ * port of shankpit-460's own real, proven verify_connect_ticket/load_ticket_secret pair
+ * (apps/server/src/main.c). Fails closed: an unset RACER_TICKET_SECRET means every connect is
+ * rejected, not silently accepted unauthenticated -- same real discipline, not a new policy. */
+static unsigned char g_ticket_secret[256];
+static int g_ticket_secret_len = 0;
+
+static void load_ticket_secret(void) {
+    const char *env = getenv("RACER_TICKET_SECRET");
+    if (!env || !env[0]) {
+        printf("WARNING: RACER_TICKET_SECRET not set -- all connect attempts will be rejected (fail closed, not fail open)\n");
+        return;
+    }
+    size_t len = strlen(env);
+    if (len > sizeof(g_ticket_secret)) len = sizeof(g_ticket_secret);
+    memcpy(g_ticket_secret, env, len);
+    g_ticket_secret_len = (int)len;
+    printf("RACER_TICKET_SECRET loaded (%d bytes)\n", g_ticket_secret_len);
+}
+
+/* verify_connect_ticket checks the RC_TICKET_TOTAL_LEN-byte ticket appended to a real
+ * RcConnectPacket (see racer_protocol.h's own doc comment for the exact wire format). On success
+ * writes the 16-byte player_id to out_player_id and returns 1; otherwise returns 0. */
+static int verify_connect_ticket(const unsigned char ticket[RC_TICKET_TOTAL_LEN],
+                                  unsigned char out_player_id[16]) {
+    if (g_ticket_secret_len == 0) return 0;
+
+    const unsigned char *payload = ticket;              /* player_id(16) + expires_at(4) */
+    const unsigned char *given_mac = ticket + RC_TICKET_PAYLOAD_LEN;
+
+    unsigned char expected_mac[32];
+    hmac_sha256(g_ticket_secret, (size_t)g_ticket_secret_len, payload, RC_TICKET_PAYLOAD_LEN, expected_mac);
+    if (!hmac_sha256_verify(given_mac, expected_mac, RC_TICKET_MAC_LEN)) {
+        return 0;
+    }
+
+    unsigned int expires_at =
+        (unsigned int)payload[16] | ((unsigned int)payload[17] << 8) |
+        ((unsigned int)payload[18] << 16) | ((unsigned int)payload[19] << 24);
+    if ((unsigned int)time(NULL) > expires_at) {
+        return 0; /* ticket expired */
+    }
+
+    memcpy(out_player_id, payload, 16);
+    return 1;
+}
+
+static void send_reject(int sock, const struct sockaddr_in *addr, socklen_t addr_len, const char *reason) {
+    RcRejectPacket rej;
+    memset(&rej, 0, sizeof(rej));
+    rej.hdr.type = RC_PACKET_REJECT;
+    snprintf(rej.reason, sizeof(rej.reason), "%s", reason);
+    sendto(sock, &rej, sizeof(rej), 0, (const struct sockaddr *)addr, addr_len);
+}
 
 /* fetch_heightmap: same real GET /heightmap?scene=&cx=&cz= call GoblinFoxDragon's own
  * battlegrounds_gui client already makes to this exact worldapi service -- one real HTTP round
@@ -193,6 +251,7 @@ int main(int argc, char **argv) {
     fcntl(sock, F_SETFL, fl | O_NONBLOCK);
 
     printf("Listening on UDP :%d (tick=%dHz)\n", server_port, RC_TICK_HZ);
+    load_ticket_secret();
 
     srand((unsigned int)time(NULL));
     memset(g_slots, 0, sizeof(g_slots));
@@ -219,12 +278,35 @@ int main(int argc, char **argv) {
             RcHeader hdr;
             memcpy(&hdr, buf, sizeof(RcHeader));
             if (hdr.type == RC_PACKET_CONNECT) {
+                if ((size_t)n < sizeof(RcConnectPacket)) {
+                    send_reject(sock, &from, from_len, "Client too old -- CONNECT missing a ticket.");
+                    continue;
+                }
+                RcConnectPacket cp;
+                memcpy(&cp, buf, sizeof(cp));
+                unsigned char player_id[16];
+                if (!verify_connect_ticket(cp.ticket, player_id)) {
+                    send_reject(sock, &from, from_len,
+                                g_ticket_secret_len == 0
+                                    ? "Server ticket auth not configured yet."
+                                    : "Ticket invalid or expired -- log in again.");
+                    continue;
+                }
                 if (!g_slots[0].active) {
                     g_slots[0].active = 1;
                     g_slots[0].is_bot = 0;
                     spawn_formation(0);
                     printf("Human claimed slot 0 from %s:%d\n", inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+                } else if (g_slots[0].has_player_id && memcmp(g_slots[0].player_id, player_id, 16) != 0) {
+                    /* One-seat-per-identity (matches shankpit-460's own find_slot_by_player_id
+                       guard) -- Phase 0 only has one human slot, so a second, different real
+                       identity trying to connect while it's occupied is rejected outright rather
+                       than silently taking over slot 0's own reply address. */
+                    send_reject(sock, &from, from_len, "A different player already holds the human slot.");
+                    continue;
                 }
+                g_slots[0].has_player_id = 1;
+                memcpy(g_slots[0].player_id, player_id, 16);
                 g_slots[0].addr = from;
                 g_slots[0].addr_len = from_len;
                 RcWelcomePacket w;

@@ -15,6 +15,11 @@
 #
 # Fetches real terrain from GoblinFoxDragon's worldapi (gfd-server-go.service,
 # already running on :7070) via localhost -- both services live on this same box.
+#
+# RACER_TICKET_SECRET (2026-08-28, "build login from the beginning take it from GFD") -- real
+# HMAC connect-ticket verification, same EnvironmentFile pattern shankpit460-server.service's own
+# SHANKPIT_TICKET_SECRET uses. Must match IDUNA's own RACER_TICKET_SECRET
+# (~/.config/iduna/env) byte-for-byte -- see packages/common/racer_protocol.h's own doc comment.
 
 [Unit]
 Description=WEAKNIGHT_BEDROCK_RACERS game server (UDP :7788)
@@ -24,6 +29,7 @@ Wants=gfd-server-go.service
 [Service]
 Type=simple
 WorkingDirectory=/home/fatbaby/WEAKNIGHT_BEDROCK_RACERS
+EnvironmentFile=-%h/.config/weaknight-racers/env
 ExecStart=/home/fatbaby/WEAKNIGHT_BEDROCK_RACERS/bin/racer_server --worldapi-host localhost --worldapi-port 7070
 Restart=on-failure
 RestartSec=10s
