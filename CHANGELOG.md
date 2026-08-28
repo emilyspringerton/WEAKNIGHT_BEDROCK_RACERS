@@ -1,4 +1,5 @@
 ## 2026-08-28
+- Real IDUNA login -> matchmaking queue -> HMAC connect-ticket flow, ported from GFD's proven battlegrounds_gui login screen. Verified live end-to-end against test@test.com/testtest. RcConnectPacket now carries a real ticket (fail-closed server verification); RcRejectPacket added for real, visible rejections. (sess-20260825-1938-f6bd411e)
 
 - NORTHSTAR pivot: racer-first, PARENA-embedded-from-day-one, grounded in the pre-EINHORN SHANKPIT_CONSTRUCT.txt reference (two-vehicle gear-shift feel, city map, deferred combat, optional arena/card mode later). See docs/NORTHSTAR.md PIVOT section. (sess-20260825-1938-f6bd411e)
 
