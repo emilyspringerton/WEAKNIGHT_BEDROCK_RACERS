@@ -2,56 +2,63 @@
 
 ## Mission
 
-A voxel Bedrock-backed racing/systems sandbox — real F1-tier vehicle physics, destructible
-terrain, and (later) emergent world simulation (boids traffic, trade routes, power grid cascades,
-self-healing cities, evolving factions), built on this monorepo's own existing, proven
-infrastructure rather than a from-scratch engine.
+**Racer first** (founder, 2026-08-28 pivot: "bedrock racers is a racer first"). A from-scratch,
+PARENA-embedded-from-day-one racing game — city-scale map, two tuned vehicle classes (crisp
+gear-shifting handling), real 8-player networked matches — built with `SHANKPIT_CONSTRUCT.txt`
+(a real, much-earlier, pre-EINHORN-rebrand SHANKPIT snapshot, pulled into this repo by CI's
+"source construct step") as the *reference* for map/physics/game-type feel, not as ported code.
+Third-person combat and the arena/MOBA card mode both existed in that older build too; combat is
+explicitly deferred/dropped, the card mode is a later optional mode, not the near-term focus.
+Emergent-systems scope from the original pitch (boids, trade routes, power grids, factions) is
+still real and still deferred, unchanged by this pivot.
 
-**Real, phased plan — see `docs/NORTHSTAR.md` before writing any gameplay code.** The founder's
-own original pitch (preserved in `README.md`) describes a full "Vertical Slice 0" that bundles
-many separate real milestones together; `docs/NORTHSTAR.md` breaks it into an actual buildable
-sequence starting from Phase 0 ("a car can drive on real voxel terrain," nothing else) rather than
-attempting the whole slice at once.
+**Real, phased plan — see `docs/NORTHSTAR.md` before writing any gameplay code.** The "PIVOT
+(2026-08-28)" section at the top of that doc is the current, authoritative direction and
+supersedes the original Phase 0-3 sequencing below it (kept for history, not deleted).
 
 ## Status
 
-**Phase 0 shipped (2026-08-04).** A real UDP server (`apps/server`, fixed 60Hz tick) and a real
-SDL2/GL client (`apps/client`) exist and are live-verified end-to-end: the server fetches
-`GoblinFoxDragon/server/worldapi`'s real `/heightmap` endpoint (port 7070, already deployed --
-reused exactly as this doc's own NORTHSTAR proposed, no second terrain generator built), grounds
-a single vehicle's Y to that real terrain every tick, and resolves a real arcade-tier vehicle sim
-(`packages/common/racer_vehicle.h`: accel/friction/braking, speed-scaled turn rate) purely
-server-side off the client's own UDP `UserCmd` packets -- the client never claims its own
-position, matching NORTHSTAR's own "not a client-authoritative stub" bar. The client independently
-fetches the same real heightmap, renders it as an actual sloped triangle mesh (not a flat
-placeholder), and renders the vehicle wherever the server's snapshot says it really is, via a real
-chase camera. Live-verified under Xvfb: real acceleration, real turning, and real terrain-relative
-Y all confirmed both via server tick logs and a screenshot showing the vehicle sitting on real
-rolling terrain, not floating or clipped. See `EMILY/BACKLOG.md` (2026-08-04, WEAKNIGHT_BEDROCK_
-RACERS Phase 0 entry) for the full verification trail.
+**Phase 0 (single-vehicle arcade prototype) shipped 2026-08-04** — real UDP server + SDL2/GL
+client, live-verified server-authoritative movement on real `worldapi` heightmap terrain. See
+`docs/NORTHSTAR.md`'s own "What Phase 0 already proved" note: the terrain-sourcing decision this
+proved stands unchanged, but the single-vehicle arcade model and Phase 0's own netcode are being
+superseded by the 2026-08-28 pivot's Phase A (city + two real vehicle classes, PARENA-first,
+built fresh rather than grown from Phase 0's code) — not because Phase 0 failed, but because the
+newly-found `SHANKPIT_CONSTRUCT.txt` reference is a strictly better starting feel (real gear
+shifting, two vehicle archetypes, a real city map) to build the racer-first direction on top of.
 
-Not yet done: real WASD-in-a-real-window input has only been exercised via a temp test hook (env
-var forcing throttle/steer, reverted before commit) -- `SDL_GetKeyboardState` itself is real,
-proven code (the same call GoblinFoxDragon's own Town client already relies on), but a live human
-at a real keyboard hasn't driven it yet. Phase 1 (real F1-tier physics, destructible terrain,
-second vehicle) is the next real milestone -- see `docs/NORTHSTAR.md`.
+Pivot work itself (Phase A onward) is freshly scoped as of this session — not started yet past
+this NORTHSTAR/CLAUDE.md documentation pass. See `EMILY/BACKLOG.md` SECTION (pivot entry, same
+date) for the live tracking.
 
 ## Reused, not reinvented
 
 - **Voxel terrain**: `GoblinFoxDragon/apps2/server-go` + `GoblinFoxDragon/server/worldapi` — real,
   already-deployed Bedrock-protocol chunk/heightmap generation. Do not build a second, parallel
-  voxel engine; extend or call into this one.
-- **Server-authoritative netcode**: `shankpit-460`'s own real UDP core (`packages/common/
-  protocol.h`, `net_sim.h`, snapshot broadcast, client-side prediction/reconciliation, HMAC
-  connect-ticket auth). Racing needs the same real-time, low-latency shape SHANKPIT already has —
-  fork it, don't reinvent it.
+  voxel engine; extend or call into this one. Unchanged by the 2026-08-28 pivot.
+- **Netcode target shape**: `shankpit-460`'s own *current*, more hardened server-authoritative UDP
+  core (fixed-tick, snapshot broadcast, client-side prediction/reconciliation, HMAC connect-ticket
+  auth) is the shape to grow this repo's own wire protocol toward (`docs/NORTHSTAR.md` Phase B) —
+  reference, not a literal fork/shared build; see the pivot's own "separate whole build" call.
+- **PARENA** — embedded deep into the gameplay/decision-logic core from day one (`docs/
+  NORTHSTAR.md` Phase A/C), not bolted on later. Follows `ECOWAR`'s own precedent as the first mod
+  to do real PARENA decision logic rather than just a trigger.
+- **`SHANKPIT_CONSTRUCT.txt`** (this repo, root) — the real reference snapshot for map/physics/
+  game-type/power-up feel; see `docs/NORTHSTAR.md`'s PIVOT section for the concrete citations
+  (line numbers) into it. Reference to build against, not code to port verbatim.
 
 ## Related Repos
 
 - `GoblinFoxDragon` — source of the real voxel/Bedrock backend (`apps2/server-go`,
   `server/worldapi`) this repo calls into for terrain.
-- `SHANKPIT` / `shankpit-460` — source of the real server-authoritative UDP netcode pattern this
-  repo forks for vehicle movement sync.
+- `SHANKPIT` / `shankpit-460` — source of `SHANKPIT_CONSTRUCT.txt` (the pre-EINHORN reference
+  build this pivot is grounded in) and of the current, more hardened netcode pattern Phase B
+  targets.
+- `PARENA` — the language embedded deep into this repo's own gameplay/decision-logic core,
+  per the 2026-08-28 pivot.
+- `ECOWAR` / `REDGARDEN` — `ECOWAR`'s 16-card PARENA-driven decision logic is the direct precedent
+  for Phase C/D's own PARENA-in-core approach; `REDGARDEN`'s `apps/arena`/`apps/arena_server` are
+  a tentative, not-yet-committed Phase E cross-pollination candidate.
 - `EMILY` — RSI loop / backlog coordination for cross-repo work.
 
 ## Founder Real-Time Direction
