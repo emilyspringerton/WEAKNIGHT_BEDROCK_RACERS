@@ -108,6 +108,52 @@ own shipped code is not thrown away — see "What Phase 0 already proved" note f
   and `ECOWAR`'s 16-card PARENA-driven system are the concrete candidates if/when this gets
   revisited; nothing here is scoped or committed yet.
 
+**Phase B, first real slice shipped (2026-08-28, same day as this pivot).** Real IDUNA login
+(email+password, ported from GFD's own proven login screen) → real matchmaking queue → real HMAC
+connect-ticket → real ticket-verified UDP CONNECT, replacing Phase 0's anonymous connect
+entirely. Verified live end-to-end with the real `test@test.com`/`testtest` account. See
+`CHANGELOG.md` same date and `EMILY/BACKLOG.md` SECTION 204 (S204-03) for the full detail — this
+is netcode/auth maturity work, not the from-scratch PARENA-first gameplay core Phase A itself
+still owns; Phase A (the actual city + two-vehicle driving core) is still not started.
+
+**Further founder real-time direction, same session, not yet scoped into a numbered phase above**
+— flagged here so it isn't lost, not yet broken into real, buildable steps:
+
+- **A real map editor, built in from day 1** ("with a map editor from day 1") — not an
+  afterthought bolted onto a finished map pipeline. Needs real scoping (own tool? embedded in the
+  client? PARENA/LINNEN-authored per the UI direction below?) before this can move past a note.
+- **GOLDENBAND built in from day 1** ("build in goldenband from day 1") — this repo's own
+  `.gband` animation asset format + sampler + BVH import pipeline (`HQ-SPEC-SIM-100`, see root
+  `CLAUDE.md`'s own GOLDENBAND row) becomes this game's real animation pipeline from the start,
+  not retrofitted later. Needs real scoping against GOLDENBAND's own current capabilities.
+- **Real fonts + shared PARENA/LINNEN UI code, not the `hud_text.h` stroke-font placeholder** —
+  "we are gonna want nice fonts" / "bring in the nice font from parena editor" / "all of the text
+  fields should be using parena editor code or we should be sharing that code for building user
+  interface elements." The login/queue screens shipped this session use `hud_text.h` (a direct
+  port of GFD's own real stroke-font renderer) specifically as a known, temporary placeholder —
+  see that file's own header comment. Real target: PARENA's own `LINNEN` widget framework
+  (`PARENA/docs/NORTHSTAR_LINNEN.md`) once BEDROCK_RACERS' PARENA embedding (Phase A/C) is real
+  enough to host it.
+- **PARENA stdlib: real car-tuning/ECU interfaces** ("can we build car tuning interfaces into
+  parena stdlib? like loading tune maps fuel maps whatever we want to mirror the apis of link
+  ecus as much as possible in terms of paradigms of how it's programmed its sposed to be the
+  best") — a genuinely new PARENA stdlib module proposal (tune-map/fuel-map data structures and
+  load/apply APIs), modeled on real Link ECU programming paradigms, not just BEDROCK_RACERS
+  gameplay code. Scope belongs partly in `PARENA/STDLIB.md`, not only here — flagged in both
+  places is the right call once this gets picked up; not started.
+- **An AI follow-drone camera mode** ("northstar an ai follow drone to take awesome footage as
+  you are driving") — a real, second, AI-driven camera (distinct from the player's own chase
+  camera) that frames cinematic footage of the player's drive, founder's own explicit ask to
+  northstar (not yet build). Real open questions: server- or client-side framing logic, how it
+  interacts with Phase A's PARENA-first architecture, whether footage capture/export is in scope
+  or just the in-game camera behavior.
+- **Osaka-styled highway-heavy city map** ("have the map be the city map we will build out the
+  highway more we want to make it like osaka") — real content direction for Phase A's own city
+  map: build out more highway (beyond the construct's own base `SCENE_CITY`), aesthetic direction
+  toward `shankpit-460`'s own already-established "Osaka" naming (`SCENE_GARAGE_OSAKA` — this
+  universe already has a real Osaka-styled hub scene to draw from, not a from-scratch aesthetic
+  invention).
+
 **What Phase 0 already proved, still real**: the original Phase 0 (below) shipped a real
 server-authoritative single-vehicle sim grounded on `GoblinFoxDragon/server/worldapi`'s real
 heightmap terrain, live-verified end-to-end. That terrain-sourcing decision (reuse `worldapi`,
