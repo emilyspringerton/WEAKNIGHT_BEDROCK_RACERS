@@ -1,4 +1,5 @@
 ## 2026-08-28
+- Real Bazel dependency graph (bazel build //...) — MODULE.bazel/.bazelrc/BUILD.bazel for packages/common, packages/simulation, apps/server, apps/client. Same real precedent PARENA/ECOWAR already established; ci.yml's gcc path stays as the fast CI build. (sess-20260825-1938-f6bd411e)
 - Real BIKE vehicle archetype (5-speed gearbox) — gear selection decided by a real PARENA-compiled function (packages/simulation/bike_gear_mod.c, from PARENA/stdlib/racer/bike_gear_mod.prn), Phase A's first real 'PARENA embedded from day one' slice. Verified live: real 1->5 upshifts under full throttle. (sess-20260825-1938-f6bd411e)
 - Real IDUNA login -> matchmaking queue -> HMAC connect-ticket flow, ported from GFD's proven battlegrounds_gui login screen. Verified live end-to-end against test@test.com/testtest. RcConnectPacket now carries a real ticket (fail-closed server verification); RcRejectPacket added for real, visible rejections. (sess-20260825-1938-f6bd411e)
 
