@@ -1,3 +1,7 @@
+## 2026-08-28
+
+- NORTHSTAR pivot: racer-first, PARENA-embedded-from-day-one, grounded in the pre-EINHORN SHANKPIT_CONSTRUCT.txt reference (two-vehicle gear-shift feel, city map, deferred combat, optional arena/card mode later). See docs/NORTHSTAR.md PIVOT section. (sess-20260825-1938-f6bd411e)
+
 ## 2026-08-25
 
 - added auto-release CI job (PITVIPER pattern): real, non-prerelease GitHub release on every push to main (sess-20260825-1938-f6bd411e)
